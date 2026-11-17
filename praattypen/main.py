@@ -23,7 +23,7 @@ from praattypen.statuswindow import create_status_window
 from praattypen.vocabulary import Vocabulary
 from praattypen.batch import BatchQueue, MeetingRecorder
 from praattypen.models_catalog import set_config_model
-from praattypen.modes import ModeState, ModeTransformer
+from praattypen.modes import ClipboardWatch, ModeState, ModeTransformer
 from praattypen.storage import auto_clean_cache, cache_plan, format_bytes, remove_paths
 from praattypen.worker import TranscriptionWorker
 
@@ -116,6 +116,17 @@ def run(config_path: str | Path) -> None:
         config, prompt_source=vocabulary.prompt, task_source=modes.whisper_task
     )
     injector = ClipboardInjector()
+    clipboard = ClipboardWatch()
+    transformer.clipboard_fresh = clipboard.fresh
+
+    def paste_text(text: str):
+        # Our own clipboard writes must not look like "you just copied this".
+        clipboard.begin_own()
+        try:
+            return injector.inject(text)
+        finally:
+            clipboard.end_own()
+
     history = HistoryStore(enabled=config.history_enabled, max_entries=config.history_size)
     # Before any window or status item exists, so nothing else has already
     # pinned the app to "no Dock icon".
@@ -137,7 +148,7 @@ def run(config_path: str | Path) -> None:
         history=history,
         config_path=Path(config_path),
         log_path=log_path,
-        repaste=injector.inject,
+        repaste=paste_text,
         vocabulary=vocabulary,
         modes=modes,
         switch_model=lambda value: switch_model(value),
@@ -148,14 +159,14 @@ def run(config_path: str | Path) -> None:
         engine_name=engine.name,
         config_path=Path(config_path),
         log_path=log_path,
-        repaste=injector.inject,
+        repaste=paste_text,
         show_window=status_window.show,
         modes=modes,
     )
     pipeline = DictationPipeline(
         engine=engine,
         cleanup=CleanupService(config.cleanup),
-        inject=injector.inject,
+        inject=paste_text,
         on_status=_status,
         fix_casing=vocabulary.apply_casing,
         transform=transformer.transform,
@@ -254,6 +265,7 @@ def run(config_path: str | Path) -> None:
 
     queued = QueuedController(controller)
     overlay.set_click_handler(queued.stop)
+    overlay.set_mode_source(lambda: modes.current)
 
     def toggle_dictation() -> None:
         """Window button (main thread): start or stop a hands-free dictation.

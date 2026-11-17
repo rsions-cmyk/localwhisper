@@ -121,6 +121,8 @@ class ModeTransformer:
         self.generate = generate
         # Selection/clipboard captured when the recording started (Rewrite).
         self.context = ""
+        # Whether the clipboard holds something you copied just now.
+        self.clipboard_fresh: Callable[[], bool] = lambda: True
 
     def capture(self) -> None:
         """Grab the text to rewrite, before our own paste touches anything.
@@ -133,8 +135,10 @@ class ModeTransformer:
         if self.state.current.key != "rewrite":
             return
 
+        allow_clipboard = self.clipboard_fresh()
+
         def grab() -> None:
-            self.context = capture_context()
+            self.context = capture_context(allow_clipboard=allow_clipboard)
 
         self._capture_thread = threading.Thread(target=grab, daemon=True, name="airquote-context")
         self._capture_thread.start()
@@ -149,6 +153,11 @@ class ModeTransformer:
             thread = getattr(self, "_capture_thread", None)
             if thread is not None:
                 thread.join(timeout=2.0)
+            if not self.context.strip():
+                # Nothing selected and nothing freshly copied: rewriting would
+                # mean inventing a target, so paste what was said instead.
+                logger.info("Rewrite: geen selectie of vers gekopieerde tekst; gewoon gedicteerd.")
+                return text
             prompt = rewrite_prompt(text, self.context)
         else:
             return text
@@ -202,7 +211,63 @@ def feedback_prompt(text: str) -> str:
     )
 
 
-def capture_context() -> str:
+class ClipboardWatch:
+    """Knows when *you* last copied something, ignoring AirQuote's own pastes.
+
+    Rewrite may only fall back to the clipboard when you copied text just
+    before speaking; old clipboard contents (or the text AirQuote itself put
+    back after pasting) must never be rewritten by surprise. Polls the
+    pasteboard's change counter twice a second, which costs next to nothing.
+    """
+
+    def __init__(self, interval: float = 0.5) -> None:
+        self._lock = threading.Lock()
+        self._count: int | None = None
+        self._changed_at = 0.0
+        self._own = 0
+        self._interval = interval
+        threading.Thread(target=self._poll, daemon=True, name="airquote-clipboard").start()
+
+    def _current(self) -> int | None:
+        try:
+            import AppKit
+
+            return int(AppKit.NSPasteboard.generalPasteboard().changeCount())
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _poll(self) -> None:
+        import time as _time
+
+        while True:
+            count = self._current()
+            with self._lock:
+                if count is not None and count != self._count:
+                    if self._count is not None and not self._own:
+                        self._changed_at = _time.monotonic()
+                    self._count = count
+            _time.sleep(self._interval)
+
+    def begin_own(self) -> None:
+        with self._lock:
+            self._own += 1
+
+    def end_own(self) -> None:
+        """After AirQuote pasted and restored: take the new counter as baseline."""
+        count = self._current()
+        with self._lock:
+            self._own = max(0, self._own - 1)
+            if count is not None:
+                self._count = count
+
+    def fresh(self, seconds: float = 120.0) -> bool:
+        import time as _time
+
+        with self._lock:
+            return bool(self._changed_at) and _time.monotonic() - self._changed_at <= seconds
+
+
+def capture_context(allow_clipboard: bool = True) -> str:
     """The text you are working on: the current selection, else the clipboard.
 
     The selection is read through the Accessibility API, which AirQuote already
@@ -212,6 +277,8 @@ def capture_context() -> str:
     selected = _selected_text()
     if selected:
         return selected
+    if not allow_clipboard:
+        return ""
     try:
         import AppKit
 

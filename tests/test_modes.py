@@ -67,3 +67,13 @@ def test_word_accuracy_counts_word_errors_ignoring_case_and_punctuation() -> Non
     assert word_accuracy("Morgen is het feest.", "morgen is het feest") == 1.0
     assert word_accuracy("one two three four", "one too three four") == 0.75
     assert word_accuracy("one two", "") == 0.0
+
+
+def test_rewrite_without_selection_or_fresh_copy_just_dictates(tmp_path) -> None:
+    state = ModeState(path=tmp_path / "mode.txt")
+    state.set("rewrite")
+    calls = []
+    transformer = ModeTransformer(state, generate=lambda p, _m, _t: calls.append(p) or "rewritten")
+    transformer.context = ""
+    assert transformer.transform("check if it works now") == "check if it works now"
+    assert not calls

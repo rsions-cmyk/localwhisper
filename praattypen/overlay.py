@@ -32,6 +32,9 @@ class Overlay(Protocol):
     def set_click_handler(self, handler) -> None:
         ...
 
+    def set_mode_source(self, source) -> None:
+        ...
+
 
 class NullOverlay:
     """No-op overlay used when AppKit isn't available or overlay is disabled."""
@@ -52,6 +55,9 @@ class NullOverlay:
         return None
 
     def set_click_handler(self, handler) -> None:
+        return None
+
+    def set_mode_source(self, source) -> None:
         return None
 
 
@@ -204,6 +210,7 @@ class RecordingOverlay:
         from praattypen.statuswindow import _target_class
 
         self._click_handler = None
+        self._mode_source = None
         self._click_target = _target_class().alloc().init()
         catcher = AppKit.NSButton.alloc().initWithFrame_(NSMakeRect(0, 0, width, height))
         catcher.setTitle_("")
@@ -239,6 +246,10 @@ class RecordingOverlay:
 
     def set_click_handler(self, handler) -> None:
         self._click_handler = handler
+
+    def set_mode_source(self, source) -> None:
+        """Callable returning the current Mode, so the bar can name it."""
+        self._mode_source = source
 
     def _clicked(self) -> None:
         if self._mode in ("listening", "hands_free") and self._click_handler is not None:
@@ -295,9 +306,15 @@ class RecordingOverlay:
     def _update_timer_label(self) -> None:
         elapsed = int(time.monotonic() - self._started)
         clock = f"{elapsed // 60}:{elapsed % 60:02d}"
-        self._label.setStringValue_(
-            f"{clock}  · click to stop" if self._mode == "hands_free" else clock
-        )
+        mode = self._mode_source() if self._mode_source is not None else None
+        if mode is not None and mode.key != "dictate":
+            # Anything but plain dictation changes what gets pasted: say so.
+            self._label.setStringValue_(f"{clock}  · {mode.short}")
+            self._label.setTextColor_(ui.rgb((1.0, 0.78, 0.45)))
+        else:
+            self._label.setStringValue_(
+                f"{clock}  · click to stop" if self._mode == "hands_free" else clock
+            )
 
     def _pulse_label(self) -> None:
         from Quartz import CABasicAnimation
