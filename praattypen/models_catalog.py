@@ -193,3 +193,30 @@ def downloaded_bytes(repo: str) -> int:
     if not folder.is_dir():
         return 0
     return sum(path.stat().st_size for path in folder.iterdir() if path.is_file())
+
+
+def resolve_whisper_model(value: str, info: SystemInfo | None = None) -> str:
+    """Turn the configured model into something mlx-whisper can load.
+
+    - "auto" (or empty): the model recommended for this Mac;
+    - a folder that does not exist (a config copied from another Mac): warn
+      and fall back to "auto" instead of failing every dictation;
+    - a catalog model that already sits in another app's model folder: use
+      that copy instead of downloading it again.
+
+    A repo id that is not on disk yet is returned as-is: mlx-whisper downloads
+    it on first use.
+    """
+    value = (value or "").strip()
+    if value.startswith("~"):
+        value = str(Path(value).expanduser())
+    if value.startswith("/") and not Path(value).exists():
+        logger.warning("Spraakmodel %s bestaat niet op deze Mac; kies automatisch.", value)
+        value = "auto"
+    if value.lower() == "auto" or not value:
+        value = recommend(info or system_info())
+    if not value.startswith("/"):
+        path = local_path(value)
+        if path is not None and not str(path).startswith(str(HF_HUB)):
+            return str(path)
+    return value

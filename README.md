@@ -1,251 +1,198 @@
-# PraatTypen
+# AirQuote
 
-Lokale push-to-talk dicteertool voor macOS. Houd **Fn** ingedrukt, praat, laat los: de
-tekst verschijnt op je cursor, in elke app. Vergelijkbaar met Wispr Flow, maar de
-spraakherkenning draait volledig op je eigen Mac. Er gaat geen audio het internet op.
+Push-to-talk dictation for the Mac that runs entirely on your own computer. Hold
+**Right Option ⌥**, speak, let go: the text appears at your cursor, in any app.
+No audio leaves your Mac.
 
 ```
-Fn ingedrukt ─► microfoon opnemen ─► Fn los ─► Whisper (lokaal, MLX) ─► [opschonen] ─► Cmd+V op je cursor
+hold key ─► microphone ─► let go ─► Whisper (on this Mac, MLX) ─► [mode] ─► pasted at your cursor
 ```
 
-Gemeten op een MacBook Air M3 (24 GB), 70 echte dictaten van gemiddeld 11 seconden: de
-tekst staat er een mediaan **1,7 s** na het loslaten (90% binnen 4 s, plakken
-meegerekend). Stopwoorden als "uh" en "ehm" kwamen in geen enkel dictaat terug, zonder
-extra opschoonstap. Hoe dat zit staat in [docs/MODELLEN.md](docs/MODELLEN.md).
+Based on [PraatTypen](https://github.com/sebastiaanvankemenade-commits/localwhisper) by
+Sebastiaan van Kemenade. The background documents in [docs/](docs/) are from that
+project and in Dutch.
 
-## Documentatie
+## What it does
 
-| Document | Waarvoor |
-|---|---|
-| Deze README | installeren, gebruiken, instellen, problemen oplossen |
-| [docs/MODELLEN.md](docs/MODELLEN.md) | welke lokale modellen, de afwegingen, en hoe "uh's" en stotteringen eruit gaan |
-| [docs/ARCHITECTUUR.md](docs/ARCHITECTUUR.md) | hoe het in elkaar zit, en de macOS-valkuilen die we onderweg tegenkwamen |
-| [docs/NABOUWEN-MET-CLAUDE.md](docs/NABOUWEN-MET-CLAUDE.md) | een opdracht die je zo aan Claude kunt geven om dit na te bouwen of te verbeteren |
+- **Dictate** into any app: hold the hotkey, or **double-tap** it for hands-free and tap
+  again (or click the floating bar) to stop. The window also has a **Start Dictation**
+  button.
+- **Dutch and English**: each dictation is detected as one or the other.
+- **Modes** (in the window or the menu bar):
 
-## Wat je nodig hebt
+  | Mode | What gets pasted | Needs |
+  |---|---|---|
+  | Dictate | exactly what you said | – |
+  | → English | an English translation of what you said | – (Whisper itself) |
+  | → Dutch | a Dutch translation | Ollama |
+  | Feedback | your spoken remarks as structured, constructive student feedback | Ollama |
+  | Rewrite | your selected (or just-copied) text, changed as you asked: "make this more academic" | Ollama |
 
-- Een Mac met **Apple Silicon** (M1 of nieuwer). MLX, waarop de lokale modellen
-  draaien, werkt niet op Intel-Macs.
-- macOS 11 of nieuwer. Ontwikkeld en getest op macOS 26.
-- **Python 3.11+**. Hier draait 3.13 van python.org. Homebrew-Python kan ook.
-- [Homebrew](https://brew.sh) voor `ffmpeg` en eventueel `ollama`.
-- Ongeveer **0,5 GB** schijfruimte voor het standaardmodel, plus 1,9 GB als je
-  AI-opschoning wilt.
+- **Vocabulary**: names and jargon it should always spell your way (BUas, ILO, …).
+- **Recordings**: drop an interview, meeting or lecture into the window, or record one
+  there. You get a transcript with timestamps and, optionally, **speakers told apart**
+  (`[00:05] Speaker B: …`), saved next to the recording. Imports into ATLAS.ti, NVivo
+  and MAXQDA as plain text.
+- **Models**: shows your Mac, recommends the speech model that suits it, downloads
+  others, and has an on-demand speed test.
 
-## Installatie
+Everything is processed on your Mac. The optional AI modes use [Ollama](https://ollama.com),
+which also runs locally.
 
-### 1. Code op de goede plek zetten
+## What you need
 
-```bash
-git clone https://github.com/sebastiaanvankemenade-commits/localwhisper.git ~/Developer/praattypen
-```
+- A Mac with **Apple Silicon** (M1 or newer). MLX does not run on Intel Macs.
+- **macOS 13** or newer. Developed on macOS 26.
+- **Python 3.11+** and **[Homebrew](https://brew.sh)**.
+- **Disk**: about 1 GB for the app's Python packages (2 GB with speaker separation),
+  plus 0.5–3 GB for a speech model.
+- Optional: **Ollama** with a model such as `gemma4:12b` (8 GB) for → Dutch, Feedback and
+  Rewrite. On a Mac with 8–16 GB memory, pick a smaller model.
+- Optional: a free **Hugging Face** account for speaker separation (see below).
 
-Een andere map kan ook, maar **niet** `~/Documents`,
-`~/Desktop` of `~/Downloads`. Die mappen zijn door macOS afgeschermd (TCC). Daar kan de
-app zijn eigen code niet lezen en krijg je `PermissionError: Operation not permitted`.
-Vanuit Terminal werkt het dan wél, en dat maakt het extra verwarrend.
+## Install
 
-### 2. Python-omgeving
+1. Put the code in a normal folder, **not** in Documents, Desktop, Downloads, iCloud or
+   OneDrive. macOS shields those folders and the app could not read its own code there.
 
-```bash
-cd ~/Developer/praattypen
-python3 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -r requirements.txt
-brew install ffmpeg          # nodig voor 'transcribe <bestand>' en voor Parakeet
-```
+   ```bash
+   git clone https://github.com/sebastiaanvankemenade-commits/localwhisper.git ~/Developer/airquote
+   ```
 
-### 3. Model alvast ophalen (optioneel)
+2. Check that your Mac is ready (changes nothing):
 
-Bij de eerste start downloadt PraatTypen het Whisper-model (~440 MB) van Hugging Face.
-Wil je dat vooraf doen, en meteen controleren dat alles werkt:
+   ```bash
+   cd ~/Developer/airquote && ./install.sh --check
+   ```
 
-```bash
-say -v Xander "Dit is een test van PraatTypen." -o /tmp/test.aiff
-.venv/bin/python -m praattypen.main transcribe /tmp/test.aiff
-```
+3. Install. The script asks whether to add speaker separation (`--speakers` or
+   `--no-speakers` decides up front):
 
-### 4. De app bouwen
+   ```bash
+   ./install.sh
+   ```
 
-```bash
-./scripts/build_app.sh
-open /Applications/PraatTypen.app
-```
+   It installs ffmpeg if needed, sets up Python, downloads the speech model recommended
+   for your Mac, builds `/Applications/AirQuote.app`, opens it, and opens the right pages of
+   System Settings.
 
-Dit maakt `/Applications/PraatTypen.app`, vindbaar via Spotlight ("praattypen"). Het is
-een dunne schil: de bundel start de Python-code uit **deze map**. Wijzig je de code, dan
-hoef je dus niet opnieuw te bouwen. Herstart de app en hij gebruikt de nieuwe code.
-Verplaats je de map, bouw dan wel opnieuw.
+4. **Give three permissions.** In System Settings → Privacy & Security, switch AirQuote on
+   under:
 
-Waarom een app en niet gewoon een script? macOS geeft microfoon- en toetsenbordrechten
-aan het programma dat erom vraagt. Vanuit Terminal krijgt *Terminal* die rechten, en
-daarmee elk ander script dat je daar ooit draait. De bundel vraagt ze op eigen naam
-(`nl.praattypen.app`).
+   | List | Why | Without it |
+   |---|---|---|
+   | **Input Monitoring** | to see the hotkey | the hotkey does nothing |
+   | **Accessibility** | to paste with Cmd+V | the text stays on your clipboard |
+   | **Microphone** | to record | macOS asks the first time you dictate: click Allow |
 
-### 5. Rechten geven
+   Not listed? Click **+** and choose Applications → AirQuote. Then **quit AirQuote and open
+   it again**: a running app does not see new permissions.
 
-Systeeminstellingen → Privacy en beveiliging. Zet **PraatTypen** aan in drie lijsten:
+5. Hold **Right Option ⌥**, speak, let go.
 
-| Lijst | Waarvoor | Zonder dit |
+### Optional extras
+
+- **AI modes** (→ Dutch, Feedback, Rewrite):
+
+  ```bash
+  brew install ollama
+  ```
+  ```bash
+  ollama pull gemma4:12b
+  ```
+
+  Without Ollama these modes paste the plain transcript, and the floating bar says
+  "Plain text · AI off".
+
+- **Speaker separation** (Recordings tab): install with `./install.sh --speakers`, accept the
+  model's terms once at
+  [huggingface.co/pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1),
+  then log in once:
+
+  ```bash
+  .venv/bin/hf auth login
+  ```
+
+- **Start at login**: System Settings → General → Login Items → **+** → AirQuote.
+
+## Using it
+
+1. Put your cursor where the text should go.
+2. Hold **Right Option ⌥** and speak. The floating bar shows a waveform and a timer. If a
+   mode other than Dictate is on, it says which ("0:03 · Feedback").
+3. Let go. The bar shows "Transcribing…" and then "✓ Pasted".
+
+Your clipboard is put back after pasting. Click the **Dock icon** for the window: mode,
+today's numbers, recent dictations (copy or paste again), Recordings, Vocabulary, Models
+and Setup.
+
+Hands-free: **double-tap** the hotkey, speak as long as you like, then tap once or click
+the floating bar. The click does not take focus away from the app you are typing in.
+
+## Settings
+
+Your settings are in `~/.config/praattypen/config.yaml`. `install.sh` creates it from the
+[config.yaml](config.yaml) in this folder, which explains every option. Restart AirQuote
+after a change. The most useful ones:
+
+| Setting | Default | |
 |---|---|---|
-| **Microfoon** | opnemen | je krijgt stilte, zonder foutmelding |
-| **Invoermonitoring** | de Fn-toets zien | de sneltoets doet niets |
-| **Toegankelijkheid** | Cmd+V versturen | de tekst blijft op je klembord staan in plaats van geplakt te worden |
+| `hotkey` | `right_option` | also `right_command`, `right_control`, `left_option`, `fn`, `f13`, … |
+| `language` | `nl,en` | detect between these; `en` fixes one language; `auto` lets Whisper choose any |
+| `models.whisper` | `auto` | the model recommended for this Mac, or a Hugging Face repo id |
+| `assistant_model` | `gemma4:12b` | Ollama model for the AI modes |
+| `sounds_enabled`, `sound_volume` | `true`, `0.25` | soft sounds on start, stop and paste |
+| `history_enabled` | `true` | keep recent dictations for the window; `false` keeps nothing on disk |
 
-Invoermonitoring en Toegankelijkheid zijn **verschillende lijsten**. Je hebt ze allebei
-nodig. Herstart PraatTypen nadat je een recht hebt gegeven: een draaiend proces ziet de
-wijziging niet.
+What is stored: the text of your last 200 dictations
+(`~/Library/Application Support/PraatTypen/history.jsonl`), and your vocabulary and chosen
+mode in the same folder. The audio of dictations is never saved. Recordings you make in the
+window are saved to `~/Documents/AirQuote`.
 
-Controleren kan in `~/Library/Logs/PraatTypen.log`. Bij elke start staat daar:
+## Troubleshooting
 
-```
-Permissies: microfoon=toegestaan | invoermonitoring=toegestaan | toetsen posten=toegestaan | toegankelijkheid=toegestaan
-```
+The log is `~/Library/Logs/PraatTypen.log` (the window's **Log** button opens it).
+Python errors go to `~/Library/Logs/PraatTypen.out.log`. Log messages are in Dutch.
 
-### 6. Fn-toets vrijmaken
-
-Staat de Fn/🌐-toets in Systeeminstellingen → Toetsenbord op "Emoji tonen", "Wijzig
-invoerbron" of "Start dicteren", dan doet macOS bij elke druk ook iets. Zet de instelling
-voor die toets op **"Doe niets"**.
-
-### 7. Automatisch starten (optioneel)
-
-Systeeminstellingen → Algemeen → Inloggen → `+` → `PraatTypen.app`. Het model wordt dan
-één keer per login geladen.
-
-## Gebruik
-
-1. Zet je cursor waar de tekst moet komen.
-2. Houd **Fn** ingedrukt. Onderin het scherm verschijnt een rood balkje: *Luistert…*
-3. Praat. Laat Fn los. Het balkje wordt oranje (*Transcriberen…*) en daarna staat de
-   tekst op je cursor.
-
-Je klembord wordt na het plakken teruggezet. Wat je eerder had gekopieerd raak je dus
-niet kwijt.
-
-Waar je ziet dat PraatTypen draait:
-
-- **Dock-icoon.** Klik erop voor het **statusvenster**: status, engine en model,
-  permissies, cijfers van vandaag en de laatste 10 dictaten, met per regel een
-  **Plak**-knop.
-- **Menubalk-icoon** met "plak opnieuw", config, log en stoppen. Zie *Bekende
-  problemen*: dat icoon verschijnt op macOS 26 niet.
-
-### Vanuit de terminal
-
-```bash
-scripts/praattypen                       # start push-to-talk (zelfde als de app)
-scripts/praattypen transcribe opname.m4a # transcribeer een bestand, print de tekst
-scripts/praattypen transcribe opname.m4a --paste
-scripts/praattypen history               # laatste dictaten en statistiek
-scripts/praattypen history --limit 25 --full
-scripts/praattypen cache                 # hoeveel ruimte de modellen innemen
-scripts/praattypen cache-clean --yes     # oude modelcaches opruimen
-```
-
-Wil je gewoon `praattypen` typen, zet dan een alias in `~/.zshrc`:
-
-```bash
-alias praattypen="$HOME/Developer/praattypen/scripts/praattypen"
-```
-
-Draai je vanuit de terminal, dan heeft *Terminal* de drie rechten nodig in plaats van
-PraatTypen.
-
-## Instellingen
-
-PraatTypen leest de eerste config die hij vindt: `--config <pad>`, dan
-`~/.config/praattypen/config.yaml`, dan [config.yaml](config.yaml) in deze map. Onbekende
-sleutels geven een foutmelding, zodat een tikfout niet stilletjes wordt genegeerd.
-Herstart na een wijziging.
-
-De belangrijkste:
-
-| Sleutel | Standaard | Betekenis |
-|---|---|---|
-| `hotkey` | `fn` | `fn`/`globe`, of via pynput: `f13`, `right_option`, `right_command`, `caps_lock`, één teken |
-| `language` | `nl` | taalcode voor Whisper; `auto` laat Whisper zelf raden (trager, en het gaat mis bij korte zinnen) |
-| `engine` | `local_whisper` | `local_whisper`, `local_parakeet` of `cloud_groq`; zie [docs/MODELLEN.md](docs/MODELLEN.md) |
-| `models.whisper` | `mlx-community/whisper-large-v3-turbo-q4` | elk MLX-Whisper-model van Hugging Face |
-| `cleanup.enabled` | `false` | AI-opschoning via een lokaal Ollama-model, zie hieronder |
-| `cloud_boost` | `false` | `true` = altijd Groq gebruiken (cloud), ongeacht `engine` |
-| `min_speech_seconds` / `min_speech_rms` | `0.3` / `0.0015` | stiltefilter: te korte of te stille opnames worden overgeslagen, anders verzint Whisper tekst |
-| `max_recording_seconds` | `900` | noodrem voor een gemiste Fn-loslating; `0` = uit |
-| `overlay_enabled`, `menu_bar_enabled`, `dock_icon`, `status_window_enabled` | `true` | de zichtbare onderdelen |
-| `history_enabled` / `history_size` | `true` / `200` | bewaart dictaten in `~/Library/Application Support/PraatTypen/history.jsonl` |
-| `auto_cache_clean` / `max_model_cache_gb` | `true` / `3.0` | ruimt bij de start oude Whisper/Parakeet-caches op; het actieve model blijft staan |
-
-`paste_method` staat in de config, maar alleen `clipboard` is gebouwd.
-
-### AI-opschoning (optioneel)
-
-Standaard gaat de tekst van Whisper rechtstreeks naar je cursor. Wil je dat een lokaal
-taalmodel interpunctie en hoofdletters nakijkt en stopwoorden verwijdert:
-
-```bash
-brew install ollama
-ollama pull qwen2.5:3b
-```
-
-En in `config.yaml`:
-
-```yaml
-cleanup:
-  enabled: true
-  model: "qwen2.5:3b"
-```
-
-Dit kost extra tijd per dictaat. Er is ook een risico: dicteer je een vraag, dan kan het
-taalmodel die vraag gaan *beantwoorden* in plaats van alleen netjes maken. Lees
-[docs/MODELLEN.md](docs/MODELLEN.md) voordat je dit aanzet. Draait Ollama niet, dan plakt
-PraatTypen gewoon de ruwe tekst.
-
-## Problemen oplossen
-
-Kijk eerst in het log: `~/Library/Logs/PraatTypen.log`, ook te openen via het
-statusvenster. Ruwe Python-uitvoer, zoals tracebacks, staat in
-`~/Library/Logs/PraatTypen.out.log`. Dat bestand wordt bij elke start overschreven.
-
-| Wat je ziet | Oorzaak en oplossing |
+| What you see | Cause and fix |
 |---|---|
-| Fn doet niets | Invoermonitoring staat uit, of werd gegeven terwijl de app draaide. Aanzetten en de app herstarten. |
-| Balkje verschijnt, maar er wordt niets geplakt | Toegankelijkheid staat uit. De tekst staat nog op je klembord: plak met Cmd+V. |
-| "Opname overgeslagen: te kort of te stil" | Microfoonrecht ontbreekt (log zegt dan "volledig stil"), of je sprak heel zacht. Verlaag eventueel `min_speech_rms`. |
-| Schuifje staat aan, maar het werkt niet | Na een rebuild ziet macOS de app als een andere app. `tccutil reset ListenEvent nl.praattypen.app`, idem `Accessibility` en `Microphone`, en daarna de app herstarten en opnieuw toestaan. |
-| `PaErrorCode -9986` in het log | Het audioapparaat wisselde (AirPods aan of uit). PraatTypen leest de apparaten dan opnieuw in en probeert het nog één keer. Blijft het misgaan, herstart dan. |
-| `PermissionError: Operation not permitted` | De map staat in Documents, Desktop of Downloads. Verplaatsen en opnieuw bouwen. |
-| App hangt, balkje blijft op *Luistert…* | Zie *Bekende problemen*. |
+| The hotkey does nothing | Input Monitoring is off, or was switched on while AirQuote was running. Switch it on and restart AirQuote. Meanwhile, use **Start Dictation** in the window. |
+| The bar appears but nothing is pasted | Accessibility is off. The text is still on your clipboard: paste with Cmd+V. |
+| "te kort of te stil" in the log | Microphone permission is missing, or you spoke very softly. |
+| Something other than what you said is pasted | A mode other than Dictate is on (the bar names it). Switch back to Dictate in the window. |
+| Permission is on but it doesn't work | After a rebuild macOS treats the app as new. Run `tccutil reset ListenEvent nl.airquote.app` (and the same with `Accessibility` and `Microphone`), restart, and allow again. |
+| A transcript says the speaker model needs a login | See *Speaker separation* above. |
+| `PaErrorCode -9986` in the log | The audio device changed (AirPods). AirQuote re-reads the devices and retries once. |
+| `PermissionError: Operation not permitted` | The folder is in Documents, Desktop, Downloads or cloud storage. Move it and run `./install.sh` again. |
 
-Opnieuw bouwen (`build_app.sh`) is alleen nodig als dat script zelf verandert. Elke
-rebuild geeft de app een nieuwe identiteit, en dan moet je de drie rechten opnieuw geven.
+Rebuilding the app (`install.sh` or `scripts/build_app.sh`) is only needed when the build
+script itself changes. Each rebuild gives the app a new identity, so the permissions have
+to be given again. Changes to the Python code only need a restart of AirQuote.
 
-## Bekende problemen
+## Known issues
 
-- **Af en toe loopt de app vast tijdens een opname.** Gezien op 16 en 17 november 2026:
-  de hoofdthread stopt 1 à 2 seconden na het indrukken van Fn, en alleen geforceerd
-  stoppen helpt. De oorzaak is nog niet gevonden. Het systeemlog wijst op een conflict
-  tussen de audio-thread en Python. Sinds dit gezien is schrijft
-  [praattypen/hangwatch.py](praattypen/hangwatch.py) bij een hang van meer dan 8 seconden
-  de stack van elke thread naar `~/Library/Logs/PraatTypen.hang.log`. Wacht bij een hang
-  dus ruim 10 seconden voordat je de app stopt, en bewaar dat bestand.
-- **Het menubalk-icoon verschijnt niet op macOS 26.** De bundel start met een zsh-script
-  dat zichzelf met `exec` vervangt door Python. Control Center weigert het icoon dan
-  ("process has mismatched pid version"). Dock-icoon en statusvenster werken wel. De
-  oplossing is een echt uitvoerbaar bestand (geen script) als `CFBundleExecutable`. Zie
-  [docs/ARCHITECTUUR.md](docs/ARCHITECTUUR.md).
-- **Parakeet start bij elk dictaat opnieuw.** De Parakeet-engine roept de CLI aan als apart
-  proces en laadt het model dus elke keer opnieuw. Daardoor is hij in deze versie trager
-  dan nodig.
+- **The menu bar icon does not appear on macOS 26.** The window, Dock icon and floating bar
+  work. Details in [docs/ARCHITECTUUR.md](docs/ARCHITECTUUR.md).
+- **The orange microphone dot stays on for up to 30 seconds after a dictation.** The
+  microphone stream is kept open briefly between dictations, because stopping and
+  restarting it in quick succession (as a double-tap does) could deadlock the audio driver
+  and freeze the app. That deadlock is very likely also the occasional hang noted in
+  earlier versions. Nothing is recorded while you are not dictating.
+- **Parakeet** reloads its model for every dictation and is slower than it needs to be.
 
-## Ontwikkelen
+## Development
 
 ```bash
 .venv/bin/python -m pip install -r requirements-dev.txt
+```
+```bash
 .venv/bin/python -m pytest -q
 ```
 
-De tests gebruiken geen echte microfoon, modellen of netwerk. Opnemen, transcriberen en
-plakken test je met de hand. `transcribe <bestand>` is daarvoor de snelste route.
+The tests use no real microphone, models or network. Transcribe a file from the terminal
+with `scripts/praattypen transcribe recording.m4a`, and speed-test the installed models with
+`scripts/praattypen benchmark`. The code is in [praattypen/](praattypen/).
 
-De code staat in [praattypen/](praattypen/). Een rondleiding staat in
-[docs/ARCHITECTUUR.md](docs/ARCHITECTUUR.md).
+## License
+
+None yet: the original project has no license file. Ask the author before redistributing.

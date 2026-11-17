@@ -192,17 +192,36 @@ class BatchQueue:
         self._set(job, f"Done · {speakers}{words:,} words · {_clock(job.duration)}", 1.0)
 
     def _diarize(self, audio: np.ndarray) -> list[Turn]:
-        import torch
+        try:
+            import torch
+            from pyannote.audio import Pipeline
+        except ImportError as error:
+            raise RuntimeError(
+                "speaker separation is not installed. Run ./install.sh --speakers, "
+                "or untick \u201cTell speakers apart\u201d."
+            ) from error
 
         if self._pipeline is None:
             from huggingface_hub import snapshot_download
-            from pyannote.audio import Pipeline
 
             try:
                 local = snapshot_download(DIARIZATION_MODEL, local_files_only=True)
             except Exception:  # noqa: BLE001 - not cached: fetch it once
                 local = DIARIZATION_MODEL
-            pipeline = Pipeline.from_pretrained(local)
+            try:
+                pipeline = Pipeline.from_pretrained(local)
+            except Exception as error:  # noqa: BLE001 - usually the one-time HF login
+                raise RuntimeError(
+                    "the speaker model needs a one-time Hugging Face login. Accept the "
+                    "terms at https://huggingface.co/pyannote/speaker-diarization-community-1, "
+                    "then run: .venv/bin/hf auth login"
+                ) from error
+            if pipeline is None:
+                raise RuntimeError(
+                    "the speaker model could not be downloaded. Accept its terms at "
+                    "https://huggingface.co/pyannote/speaker-diarization-community-1 "
+                    "and run: .venv/bin/hf auth login"
+                )
             if torch.backends.mps.is_available():
                 pipeline.to(torch.device("mps"))
             self._pipeline = pipeline

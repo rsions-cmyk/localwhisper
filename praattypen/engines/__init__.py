@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from praattypen.config import AppConfig
+from praattypen.models_catalog import resolve_whisper_model
 from praattypen.engines.base import TranscriptionEngine
 from praattypen.engines.cloud_groq import CloudGroqEngine
 from praattypen.engines.local_parakeet import LocalParakeetEngine
@@ -13,7 +14,8 @@ def create_engine(
     engine_name = "cloud_groq" if config.cloud_boost else config.engine
     if engine_name == "local_whisper":
         return LocalWhisperEngine(
-            language=config.language, model=config.models.whisper,
+            language=config.language,
+            model=resolve_whisper_model(config.models.whisper),
             prompt_source=prompt_source,
             task_source=task_source,
         )

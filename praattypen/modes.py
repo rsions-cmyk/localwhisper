@@ -119,6 +119,8 @@ class ModeTransformer:
                 # after a break pays the model's load time.
                 return ollama_generate(prompt, model, timeout, think=False, keep_alive="30m")
         self.generate = generate
+        # True when the last AI step failed (Ollama not running, model missing).
+        self.last_failed = False
         # Selection/clipboard captured when the recording started (Rewrite).
         self.context = ""
         # Whether the clipboard holds something you copied just now.
@@ -161,10 +163,14 @@ class ModeTransformer:
             prompt = rewrite_prompt(text, self.context)
         else:
             return text
+        self.last_failed = False
         try:
             result = strip_thinking(self.generate(prompt, self.model, self.timeout)).strip()
         except Exception as error:  # noqa: BLE001 - never lose the dictation
             logger.error("%s mislukt (%s); ruwe tekst geplakt.", mode.title, error)
+            # Shown on the floating bar: otherwise plain text arrives where a
+            # translation was expected and nothing says why.
+            self.last_failed = True
             return text
         return result or text
 

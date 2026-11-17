@@ -23,7 +23,7 @@ class Overlay(Protocol):
     def show_processing(self, label: str = "Transcribing…") -> None:
         ...
 
-    def show_done(self, pasted: bool = True) -> None:
+    def show_done(self, pasted: bool = True, note: str = "") -> None:
         ...
 
     def hide(self) -> None:
@@ -48,7 +48,7 @@ class NullOverlay:
     def show_processing(self, label: str = "Transcribing…") -> None:
         return None
 
-    def show_done(self, pasted: bool = True) -> None:
+    def show_done(self, pasted: bool = True, note: str = "") -> None:
         return None
 
     def hide(self) -> None:
@@ -211,6 +211,7 @@ class RecordingOverlay:
 
         self._click_handler = None
         self._mode_source = None
+        self._done_note = ""
         self._click_target = _target_class().alloc().init()
         catcher = AppKit.NSButton.alloc().initWithFrame_(NSMakeRect(0, 0, width, height))
         catcher.setTitle_("")
@@ -238,7 +239,8 @@ class RecordingOverlay:
         self._processing_label = label
         self._call_on_main(self._enter, "processing")
 
-    def show_done(self, pasted: bool = True) -> None:
+    def show_done(self, pasted: bool = True, note: str = "") -> None:
+        self._done_note = note
         self._call_on_main(self._enter, "done" if pasted else "copied")
 
     def hide(self) -> None:
@@ -289,8 +291,10 @@ class RecordingOverlay:
             self._orb.set_glow(ui.READY, 0.9)
             self._orb.set_speed(6.0)
             if mode == "done":
-                self._label.setStringValue_("✓  Pasted")
-                self._label.setTextColor_(ui.rgb((0.55, 0.95, 0.65)))
+                self._label.setStringValue_(self._done_note or "✓  Pasted")
+                self._label.setTextColor_(
+                    ui.rgb((1.0, 0.78, 0.45)) if self._done_note else ui.rgb((0.55, 0.95, 0.65))
+                )
             else:
                 self._label.setStringValue_("Copied")
                 self._label.setTextColor_(white)
@@ -356,7 +360,8 @@ class RecordingOverlay:
             return
         if self._mode in ("done", "copied"):
             # Let "Pasted" be read before the pill goes.
-            wait = _DONE_SECONDS - (time.monotonic() - self._done_at)
+            hold = _DONE_SECONDS * 3 if self._done_note else _DONE_SECONDS
+            wait = hold - (time.monotonic() - self._done_at)
             if wait > 0:
                 generation = self._generation
                 AppHelper.callLater(wait, self._hide_if, generation)

@@ -39,10 +39,10 @@ sample_rate: 24000
 def test_load_config_returns_defaults_when_file_is_missing(tmp_path: Path) -> None:
     config = load_config(tmp_path / "missing.yaml")
 
-    assert config.hotkey == "fn"
-    assert config.language == "nl"
+    assert config.hotkey == "right_option"
+    assert config.language == "nl,en"
     assert config.engine == "local_whisper"
-    assert config.models.whisper == "mlx-community/whisper-large-v3-turbo-q4"
+    assert config.models.whisper == "auto"
     assert config.cleanup.enabled is False
     assert config.sample_rate == 16000
     assert config.min_speech_seconds == 0.3

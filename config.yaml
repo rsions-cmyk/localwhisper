@@ -1,5 +1,21 @@
+# AirQuote settings -- the shared defaults.
+#
+# Your own copy lives in ~/.config/praattypen/config.yaml (install.sh creates
+# it from this file). AirQuote reads that one when it exists, and the Models
+# tab writes to it, so edit that file, not this one. Restart AirQuote after a
+# change.
+
+# Key to hold while you speak (double-tap it for hands-free).
+# right_option, right_command, right_control, left_option, fn, f13, ...
+# Fn is often taken by macOS (emoji, dictation) or other apps; a right-hand
+# modifier key is the safer choice.
 hotkey: "right_option"
-language: "nl,en"  # detecteert Nederlands of Engels; bij twijfel Nederlands
+
+# "nl,en" detects the language of every dictation but only chooses between
+# these, falling back to the first. One code ("en") fixes the language;
+# "auto" lets Whisper pick any language (unreliable on very short phrases).
+language: "nl,en"
+
 engine: "local_whisper"
 cloud_boost: false
 cleanup:
@@ -8,45 +24,49 @@ cleanup:
   model: "qwen2.5:3b"
   remove_fillers: true
 models:
-  whisper: "/Users/robsimons/.omlx/models/mlx-community/whisper-large-v3-mlx"
+  # "auto" picks the best model for this Mac (see the Models tab) and
+  # downloads it on first use. Or name one: a Hugging Face repo id such as
+  # "mlx-community/whisper-large-v3-turbo", or a folder with MLX weights.
+  whisper: "auto"
   parakeet: "mlx-community/parakeet-tdt-0.6b-v3"
   groq: "whisper-large-v3-turbo"
 paste_method: "clipboard"
 sample_rate: 16000
-# Opnames korter dan dit (seconden) worden genegeerd, en opnames waarvan het
-# luidste 0,3-seconde venster onder deze drempel blijft, zodat Whisper niet
-# hallucineert op stilte. Gemeten over het luidste venster en niet over de hele
-# opname: anders zakt dezelfde stem door de drempel als je Fn langer vasthoudt.
-# Echte digitale stilte (geweigerde microfoon) is exact 0.0.
+
+# Recordings shorter than this (seconds), or whose loudest 0.3 s stays below
+# this level, are ignored, so Whisper does not hallucinate on silence. True
+# digital silence (a denied microphone) is exactly 0.0.
 min_speech_seconds: 0.3
 min_speech_rms: 0.0015
-# Bij opstart: verwijder oude ongebruikte Whisper/Parakeet-caches als de lokale
-# PraatTypen-modelcache boven deze grens komt. Het huidige model blijft altijd staan.
+
+# At startup, remove unused Whisper/Parakeet downloads once they pass this
+# size. Models listed in the Models tab are never removed.
 auto_cache_clean: true
 max_model_cache_gb: 3.0
-# Toon een zwevend statusbalkje (zoals Wispr Flow) terwijl Fn ingedrukt wordt
-# gehouden en tijdens het transcriberen. Zet op false om dit uit te schakelen.
+
+# Floating bar while you dictate.
 overlay_enabled: true
-# Zachte geluidjes bij starten, stoppen en plakken (0.0 - 1.0).
+
+# Soft sounds on start, stop and paste (volume 0.0 - 1.0).
 sounds_enabled: true
 sound_volume: 0.25
-# Lokaal Ollama-model voor de modi "Translate to Dutch" en "Student Feedback".
+
+# Local Ollama model for the "to Dutch", "Feedback" and "Rewrite" modes.
+# Optional: without Ollama those modes paste the plain transcript.
 assistant_model: "gemma4:12b"
-# Toon het PraatTypen-icoon in de menubalk, met status, "plak opnieuw" en stop.
+
+# Menu bar icon (does not appear on macOS 26) and Dock icon.
 menu_bar_enabled: true
-# Toon PraatTypen in de Dock, zodat je kunt zien of hij draait. Uitzetten maakt
-# het een pure achtergrond-app zonder Dock-icoon.
 dock_icon: true
-# Noodrem: als een opname zo lang duurt is er iets misgegaan (bijv. een gemist
-# Fn-loslaten), en wordt hij automatisch afgerond en getranscribeerd. Ruim
-# instellen -- lange dictaten moeten hier nooit tegenaan lopen. 0 = uit.
+
+# Safety stop: a recording this long (seconds) is finished automatically.
 max_recording_seconds: 900
-# Statusvenster: laat zien of PraatTypen actief is, op welke engine en welk
-# model, wat de permissies doen, en de laatste opnames. Openen via de menubalk
-# of het Dock-icoon, of met `praattypen history` in de terminal.
+
+# The AirQuote window (click the Dock icon).
 status_window_enabled: true
-# Bewaar afgeronde dictaten in ~/Library/Application Support/PraatTypen/history.jsonl,
-# zodat het statusvenster ze kan tonen en je ze opnieuw kunt plakken. Zet op
-# false als je niets op schijf wilt bewaren.
+
+# Keep finished dictations in
+# ~/Library/Application Support/PraatTypen/history.jsonl for the Recent tab.
+# Set to false to keep nothing on disk.
 history_enabled: true
 history_size: 200

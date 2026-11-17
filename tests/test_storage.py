@@ -134,3 +134,20 @@ def test_cache_plan_never_removes_models_offered_in_the_models_tab(tmp_path) -> 
     plan = cache_plan(config, hub_dir=tmp_path, temp_dir=tmp_path)
 
     assert [path.name for path in plan.remove] == ["models--mlx-community--whisper-tiny"]
+
+
+def test_resolve_whisper_model_handles_auto_missing_paths_and_other_apps(tmp_path, monkeypatch) -> None:
+    from praattypen import models_catalog as catalog
+
+    info = catalog.SystemInfo(chip="Apple M2", memory_gb=8, macos="15", apple_silicon=True)
+    monkeypatch.setattr(catalog, "HF_HUB", tmp_path / "hub")
+    monkeypatch.setattr(catalog, "EXTRA_MODEL_DIRS", [tmp_path / "other"])
+
+    assert catalog.resolve_whisper_model("auto", info) == "mlx-community/whisper-large-v3-turbo-q4"
+    assert catalog.resolve_whisper_model("/no/such/folder", info) == "mlx-community/whisper-large-v3-turbo-q4"
+
+    copy = tmp_path / "other" / "mlx-community" / "whisper-large-v3-turbo-q4"
+    copy.mkdir(parents=True)
+    (copy / "weights.npz").write_bytes(b"x")
+    assert catalog.resolve_whisper_model("auto", info) == str(copy)
+    assert catalog.resolve_whisper_model("some/other-model", info) == "some/other-model"

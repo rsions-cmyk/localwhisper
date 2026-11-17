@@ -182,7 +182,10 @@ def run(config_path: str | Path) -> None:
         try:
             text = pipeline.process_recording(recording)
             if text:
-                overlay.show_done(pipeline.last_pasted)
+                overlay.show_done(
+                    pipeline.last_pasted,
+                    note="Plain text · AI off" if transformer.last_failed else "",
+                )
                 sounds.done()
                 menu_bar.set_last_transcript(text)
                 history.add(
@@ -405,7 +408,9 @@ def run_benchmark(config_path) -> int:
         for model in catalog.CATALOG
         if (path := catalog.local_path(model.repo)) is not None
     ]
-    results = benchmark.run(models, restore=config.models.whisper, on_progress=print)
+    results = benchmark.run(
+        models, restore=catalog.resolve_whisper_model(config.models.whisper), on_progress=print
+    )
     for repo, _ in models:
         print(f"{repo}\n  {benchmark.summary(results[repo])}")
     return 0

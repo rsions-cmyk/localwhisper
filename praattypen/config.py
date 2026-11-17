@@ -28,15 +28,16 @@ class CleanupConfig:
 
 @dataclass(frozen=True)
 class ModelsConfig:
-    whisper: str = "mlx-community/whisper-large-v3-turbo-q4"
+    # "auto": the model the Models tab recommends for this Mac.
+    whisper: str = "auto"
     parakeet: str = "mlx-community/parakeet-tdt-0.6b-v3"
     groq: str = "whisper-large-v3-turbo"
 
 
 @dataclass(frozen=True)
 class AppConfig:
-    hotkey: str = "fn"
-    language: str = "nl"
+    hotkey: str = "right_option"
+    language: str = "nl,en"
     engine: str = "local_whisper"
     cloud_boost: bool = False
     cleanup: CleanupConfig = field(default_factory=CleanupConfig)
