@@ -1,0 +1,35 @@
+[project]
+name = "praattypen"
+version = "0.1.0"
+description = "Local push-to-talk dictation for macOS."
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "pyyaml",
+    "sounddevice",
+    "pyperclip",
+    "pynput",
+    "requests",
+    "pyobjc-framework-Cocoa",
+    "pyobjc-framework-Quartz",
+    "pyobjc-framework-AVFoundation",
+]
+
+[project.optional-dependencies]
+stt = [
+    "mlx-whisper",
+    "parakeet-mlx",
+]
+cloud = [
+    "groq",
+]
+dev = [
+    "pytest",
+]
+
+[project.scripts]
+praattypen = "praattypen.main:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

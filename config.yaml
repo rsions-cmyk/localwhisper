@@ -1,0 +1,47 @@
+hotkey: "fn"
+language: "nl"
+engine: "local_whisper"
+cloud_boost: false
+cleanup:
+  enabled: false
+  provider: "ollama"
+  model: "qwen2.5:3b"
+  remove_fillers: true
+models:
+  whisper: "mlx-community/whisper-large-v3-turbo-q4"
+  parakeet: "mlx-community/parakeet-tdt-0.6b-v3"
+  groq: "whisper-large-v3-turbo"
+paste_method: "clipboard"
+sample_rate: 16000
+# Opnames korter dan dit (seconden) worden genegeerd, en opnames waarvan het
+# luidste 0,3-seconde venster onder deze drempel blijft, zodat Whisper niet
+# hallucineert op stilte. Gemeten over het luidste venster en niet over de hele
+# opname: anders zakt dezelfde stem door de drempel als je Fn langer vasthoudt.
+# Echte digitale stilte (geweigerde microfoon) is exact 0.0.
+min_speech_seconds: 0.3
+min_speech_rms: 0.0015
+# Bij opstart: verwijder oude ongebruikte Whisper/Parakeet-caches als de lokale
+# PraatTypen-modelcache boven deze grens komt. Het huidige model blijft altijd staan.
+auto_cache_clean: true
+max_model_cache_gb: 3.0
+# Toon een zwevend statusbalkje (zoals Wispr Flow) terwijl Fn ingedrukt wordt
+# gehouden en tijdens het transcriberen. Zet op false om dit uit te schakelen.
+overlay_enabled: true
+# Toon het PraatTypen-icoon in de menubalk, met status, "plak opnieuw" en stop.
+menu_bar_enabled: true
+# Toon PraatTypen in de Dock, zodat je kunt zien of hij draait. Uitzetten maakt
+# het een pure achtergrond-app zonder Dock-icoon.
+dock_icon: true
+# Noodrem: als een opname zo lang duurt is er iets misgegaan (bijv. een gemist
+# Fn-loslaten), en wordt hij automatisch afgerond en getranscribeerd. Ruim
+# instellen -- lange dictaten moeten hier nooit tegenaan lopen. 0 = uit.
+max_recording_seconds: 900
+# Statusvenster: laat zien of PraatTypen actief is, op welke engine en welk
+# model, wat de permissies doen, en de laatste opnames. Openen via de menubalk
+# of het Dock-icoon, of met `praattypen history` in de terminal.
+status_window_enabled: true
+# Bewaar afgeronde dictaten in ~/Library/Application Support/PraatTypen/history.jsonl,
+# zodat het statusvenster ze kan tonen en je ze opnieuw kunt plakken. Zet op
+# false als je niets op schijf wilt bewaren.
+history_enabled: true
+history_size: 200

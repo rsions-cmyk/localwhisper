@@ -1,0 +1,25 @@
+#!/bin/zsh
+set -euo pipefail
+
+# Derived from where this script lives, so moving the checkout does not break it.
+APP_DIR="${PRAATTYPEN_HOME:-${0:A:h:h}}"
+PYTHON="$APP_DIR/.venv/bin/python"
+
+if [[ ! -d "$APP_DIR" ]]; then
+  print -u2 "PraatTypen-map niet gevonden: $APP_DIR"
+  exit 1
+fi
+
+if [[ ! -x "$PYTHON" ]]; then
+  print -u2 "Python virtualenv niet gevonden: $PYTHON"
+  print -u2 "Open eerst de projectmap en run: python3 -m venv .venv && .venv/bin/python -m pip install -r requirements.txt"
+  exit 1
+fi
+
+cd "$APP_DIR"
+
+if [[ $# -eq 0 ]]; then
+  set -- run
+fi
+
+exec "$PYTHON" -m praattypen.main "$@"

@@ -1,0 +1,11 @@
+.venv/
+# Build artifact of scripts/build_app.sh, with this checkout's paths baked in.
+PraatTypen.app/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.wav
+*.log
+.DS_Store
+# Persoonlijke Claude Code-rechten van wie de map gebruikt.
+.claude/settings.local.json

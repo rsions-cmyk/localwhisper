@@ -1,0 +1,20 @@
+numpy
+pyyaml
+sounddevice
+pyperclip
+pynput
+requests
+
+# Local STT engines
+mlx-whisper
+parakeet-mlx
+
+# Optional cloud boost
+groq
+
+# Fn/Globe hotkey, floating overlay and menu bar item. Not optional on macOS:
+# without these PraatTypen falls back to no indicator at all.
+pyobjc-framework-Cocoa
+pyobjc-framework-Quartz
+# Alleen om de microfoon-permissiestatus te kunnen uitlezen.
+pyobjc-framework-AVFoundation

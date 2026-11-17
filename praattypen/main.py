@@ -1,0 +1,354 @@
+from __future__ import annotations
+
+import argparse
+import time
+from pathlib import Path
+
+from praattypen.appearance import apply_activation_policy
+from praattypen.audio import AudioRecorder, Recording
+from praattypen.cleanup import CleanupService
+from praattypen.config import default_config_path, load_config
+from praattypen.engines import create_engine
+from praattypen.hangwatch import start_hang_watch
+from praattypen.history import HistoryEntry, HistoryStore, format_duration
+from praattypen.hotkey import PushToTalkController, listen_push_to_talk
+from praattypen.inject import ClipboardInjector
+from praattypen.logging_setup import get_logger, setup_logging
+from praattypen.menubar import create_menu_bar
+from praattypen.overlay import create_overlay
+from praattypen.permissions import log_permissions
+from praattypen.pipeline import DictationPipeline
+from praattypen.statuswindow import create_status_window
+from praattypen.storage import auto_clean_cache, cache_plan, format_bytes, remove_paths
+from praattypen.worker import TranscriptionWorker
+
+logger = get_logger(__name__)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="praattypen",
+        description="Local push-to-talk dictation for macOS.",
+    )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Path to config.yaml. Defaults to ~/.config/praattypen/config.yaml.",
+    )
+
+    subparsers = parser.add_subparsers(dest="command")
+
+    run_parser = subparsers.add_parser("run", help="Start push-to-talk dictation.")
+    run_parser.add_argument("--config", default=None, help="Path to config.yaml.")
+
+    transcribe_parser = subparsers.add_parser(
+        "transcribe",
+        help="Transcribe one audio file and print the text without pasting.",
+    )
+    transcribe_parser.add_argument("audio_path")
+    transcribe_parser.add_argument("--config", default=None, help="Path to config.yaml.")
+    transcribe_parser.add_argument(
+        "--paste",
+        action="store_true",
+        help="Paste the transcript at the current cursor after transcribing.",
+    )
+
+    history_parser = subparsers.add_parser(
+        "history",
+        help="Toon de laatste opnames en waar PraatTypen op staat.",
+    )
+    history_parser.add_argument("--config", default=None, help="Path to config.yaml.")
+    history_parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Hoeveel opnames tonen (standaard 10).",
+    )
+    history_parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Toon de volledige transcripten in plaats van een samenvatting per regel.",
+    )
+
+    cache_parser = subparsers.add_parser("cache", help="Show local model and temp-audio cache usage.")
+    cache_parser.add_argument("--config", default=None, help="Path to config.yaml.")
+
+    clean_parser = subparsers.add_parser(
+        "cache-clean",
+        help="Remove unused PraatTypen model caches and temporary audio.",
+    )
+    clean_parser.add_argument("--config", default=None, help="Path to config.yaml.")
+    clean_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Actually delete files. Without this flag, only shows what would be removed.",
+    )
+
+    parser.set_defaults(command="run")
+    return parser
+
+
+def build_pipeline(config_path: str | Path, paste: bool = True) -> DictationPipeline:
+    config = load_config(config_path)
+    engine = create_engine(config)
+    cleanup = CleanupService(config.cleanup)
+    injector = ClipboardInjector()
+    inject = injector.inject if paste else lambda _text: None
+    return DictationPipeline(engine=engine, cleanup=cleanup, inject=inject, on_status=_status)
+
+
+def run(config_path: str | Path) -> None:
+    log_path = setup_logging()
+    config = load_config(config_path)
+    log_permissions()
+    maybe_auto_clean_cache(config)
+
+    engine = create_engine(config)
+    injector = ClipboardInjector()
+    history = HistoryStore(enabled=config.history_enabled, max_entries=config.history_size)
+    # Before any window or status item exists, so nothing else has already
+    # pinned the app to "no Dock icon".
+    apply_activation_policy(config.dock_icon)
+    overlay = create_overlay(enabled=config.overlay_enabled)
+    status_window = create_status_window(
+        enabled=config.status_window_enabled,
+        config=config,
+        engine_name=engine.name,
+        model=getattr(engine, "model", ""),
+        history=history,
+        config_path=Path(config_path),
+        log_path=log_path,
+        repaste=injector.inject,
+    )
+    menu_bar = create_menu_bar(
+        enabled=config.menu_bar_enabled,
+        engine_name=engine.name,
+        config_path=Path(config_path),
+        log_path=log_path,
+        repaste=injector.inject,
+        show_window=status_window.show,
+    )
+    pipeline = DictationPipeline(
+        engine=engine,
+        cleanup=CleanupService(config.cleanup),
+        inject=injector.inject,
+        on_status=_status,
+    )
+    recorder = AudioRecorder(
+        sample_rate=config.sample_rate,
+        min_duration_seconds=config.min_speech_seconds,
+        min_rms=config.min_speech_rms,
+    )
+
+    def idle() -> None:
+        overlay.hide()
+        menu_bar.set_idle()
+        status_window.set_idle()
+
+    def process_recording(recording: Recording) -> None:
+        started = time.monotonic()
+        try:
+            text = pipeline.process_recording(recording)
+            if text:
+                menu_bar.set_last_transcript(text)
+                history.add(
+                    HistoryEntry(
+                        text=text,
+                        duration_seconds=recording.duration_seconds,
+                        transcribe_seconds=time.monotonic() - started,
+                        engine=engine.name,
+                        model=getattr(engine, "model", ""),
+                        pasted=pipeline.last_pasted,
+                    )
+                )
+                status_window.refresh()
+        finally:
+            idle()
+
+    def on_stopped(recording: Recording) -> None:
+        _status(f"Opname gestopt ({recording.duration_seconds:.1f}s), in de wachtrij.")
+        overlay.show_processing()
+        menu_bar.set_processing()
+        status_window.set_processing()
+
+    def on_started() -> None:
+        _status("Opname gestart.")
+        overlay.show_listening()
+        menu_bar.set_listening()
+        status_window.set_listening()
+
+    def on_skipped() -> None:
+        _status("Opname overgeslagen: te kort of te stil. Houd Fn langer ingedrukt en praat duidelijk.")
+        idle()
+
+    def on_failed(error: BaseException) -> None:
+        _status(f"Opname mislukt: {error}")
+        idle()
+
+    worker = TranscriptionWorker(process_recording, on_error=lambda error: _status(f"Fout: {error}"))
+    # Load the model now, on the worker thread, so the first dictation of the
+    # session does not have to wait for it.
+    worker.submit_task(pipeline.engine.warm_up)
+    controller = PushToTalkController(
+        recorder,
+        worker.submit,
+        on_started=on_started,
+        on_stopped=on_stopped,
+        on_skipped=on_skipped,
+        on_failed=on_failed,
+        max_recording_seconds=config.max_recording_seconds,
+    )
+
+    hang_watch = start_hang_watch()
+
+    _status(
+        f"PraatTypen luistert. Houd {config.hotkey} ingedrukt om te praten; "
+        "laat los om te transcriberen en plakken. Stoppen kan via de menubalk of Ctrl+C."
+    )
+    try:
+        listen_push_to_talk(config.hotkey, controller)
+    except KeyboardInterrupt:
+        _status("Gestopt.")
+    finally:
+        if hang_watch is not None:
+            hang_watch.stop()
+        worker.stop()
+
+
+def transcribe(audio_path: str | Path, config_path: str | Path, paste: bool = False) -> str:
+    pipeline = build_pipeline(config_path, paste=paste)
+    text = pipeline.process_audio_file(Path(audio_path))
+    if not paste:
+        print(text)
+    return text
+
+
+def show_history(config_path: str | Path, limit: int = 10, full: bool = False) -> None:
+    config = load_config(config_path)
+    engine_name = "cloud_groq" if config.cloud_boost else config.engine
+    models = {
+        "local_whisper": config.models.whisper,
+        "local_parakeet": config.models.parakeet,
+        "cloud_groq": config.models.groq,
+    }
+    store = HistoryStore(enabled=config.history_enabled, max_entries=config.history_size)
+    entries = store.recent(limit)
+    stats = store.stats()
+
+    print(f"Engine:      {engine_name}")
+    print(f"Model:       {models.get(engine_name, 'onbekend')}")
+    print(f"Taal:        {config.language}   Sneltoets: {config.hotkey}")
+    print(
+        "Opschoning:  "
+        + (
+            f"aan ({config.cleanup.provider}: {config.cleanup.model})"
+            if config.cleanup.enabled
+            else "uit"
+        )
+    )
+    print(
+        f"Vandaag:     {stats.today} opnames, {stats.words_today} woorden, "
+        f"{format_duration(stats.speech_seconds_today)} spraak, "
+        f"gemiddeld {stats.average_transcribe_seconds:.1f}s transcriberen"
+    )
+    print(f"Bewaard:     {stats.total} opnames in {store.path}")
+    print()
+
+    if not entries:
+        print("Nog geen opnames bewaard.")
+        return
+
+    print(f"Laatste {len(entries)} opnames (nieuwste eerst):")
+    for entry in entries:
+        flag = "" if entry.pasted else "  [niet geplakt]"
+        head = (
+            f"  {entry.local_day} {entry.local_time}  {entry.duration_seconds:5.1f}s  "
+            f"{entry.word_count:3d}w"
+        )
+        print(f"{head}  {entry.text if full else entry.preview(70)}{flag}")
+
+
+def show_cache(config_path: str | Path) -> None:
+    plan = cache_plan(load_config(config_path))
+    _print_cache_plan(plan)
+
+
+def clean_cache(config_path: str | Path, yes: bool = False) -> None:
+    plan = cache_plan(load_config(config_path))
+    _print_cache_plan(plan)
+    targets = plan.remove + plan.temp_audio
+    if not targets:
+        print("Niets om op te ruimen.")
+        return
+    if not yes:
+        print("Dry-run: voeg --yes toe om dit echt te verwijderen.")
+        return
+    removed = remove_paths(targets)
+    print(f"Opgeruimd: {removed} pad(en).")
+
+
+def _print_cache_plan(plan) -> None:
+    print("Bewaarde modelcaches:")
+    if plan.keep:
+        for path in plan.keep:
+            print(f"  KEEP   {path.name} ({format_bytes(_path_size(path))})")
+    else:
+        print("  Geen huidige lokale modelcache gevonden.")
+
+    print("Opruimbare modelcaches:")
+    if plan.remove:
+        for path in plan.remove:
+            print(f"  REMOVE {path.name} ({format_bytes(_path_size(path))})")
+    else:
+        print("  Geen oude Whisper/Parakeet caches gevonden.")
+
+    print(f"Vrij te maken modelruimte: {format_bytes(plan.reclaimable_bytes)}")
+    print(f"PraatTypen tijdelijke audio: {len(plan.temp_audio)} bestand(en), {format_bytes(plan.temp_audio_bytes)}")
+
+
+def _path_size(path: Path) -> int:
+    from praattypen.storage import dir_size
+
+    return dir_size(path)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    config_path = Path(args.config) if args.config else default_config_path()
+
+    if args.command == "transcribe":
+        transcribe(args.audio_path, config_path, paste=args.paste)
+        return 0
+    if args.command == "history":
+        show_history(config_path, limit=args.limit, full=args.full)
+        return 0
+    if args.command == "cache":
+        show_cache(config_path)
+        return 0
+    if args.command == "cache-clean":
+        clean_cache(config_path, yes=args.yes)
+        return 0
+
+    run(config_path)
+    return 0
+
+
+def _status(message: str) -> None:
+    logger.info(message)
+
+
+def maybe_auto_clean_cache(config) -> None:
+    if not config.auto_cache_clean:
+        return
+    max_bytes = int(config.max_model_cache_gb * 1024 * 1024 * 1024)
+    result = auto_clean_cache(config, max_bytes=max_bytes)
+    if result.removed_paths:
+        _status(
+            f"Cache automatisch opgeruimd: {result.removed_paths} pad(en), "
+            f"{format_bytes(result.reclaimed_bytes)} vrijgemaakt."
+        )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
