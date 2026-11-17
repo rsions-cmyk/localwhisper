@@ -1,0 +1,29 @@
+AirQuote
+========
+
+AirQuote is a modified version of PraatTypen.
+
+  Original work:  PraatTypen
+                  Copyright (c) 2026 Sebastiaan van Kemenade
+                  https://github.com/sebastiaanvankemenade-commits/localwhisper
+
+  Modifications:  AirQuote
+                  Copyright (c) 2026 Rob Simons
+
+The original project was published without a license. Until its author
+grants one, all rights to the original work remain with him, and this
+repository must not be redistributed or reused without his permission.
+The original commits are kept, unchanged and under his name, in this
+repository's history (starting at commit 915c6e4).
+
+Third-party software and models (not included here; installed separately,
+each under its own license):
+
+  - Whisper models (OpenAI), MIT, run through mlx-whisper (MIT) and MLX (MIT)
+    from Apple's ml-explore project.
+  - pyannote.audio (MIT), by Hervé Bredin and contributors.
+  - Speaker model "pyannote/speaker-diarization-community-1" by pyannote,
+    licensed CC BY 4.0: https://huggingface.co/pyannote/speaker-diarization-community-1
+    Each user accepts its terms on Hugging Face when downloading it.
+  - PyTorch (BSD-style), NumPy (BSD-3-Clause), sounddevice (MIT),
+    PyObjC (MIT), huggingface_hub (Apache-2.0).

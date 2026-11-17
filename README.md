@@ -193,6 +193,41 @@ The tests use no real microphone, models or network. Transcribe a file from the 
 with `scripts/praattypen transcribe recording.m4a`, and speed-test the installed models with
 `scripts/praattypen benchmark`. The code is in [praattypen/](praattypen/).
 
+## Credits
+
+AirQuote is built on **[PraatTypen](https://github.com/sebastiaanvankemenade-commits/localwhisper)**
+by **Sebastiaan van Kemenade**. His original commits are kept, under his name, in this
+repository's history.
+
+**From PraatTypen** — the idea and the foundation:
+
+- local push-to-talk dictation with Whisper on Apple's MLX, entirely on the Mac;
+- the app-bundle approach that gives the app its own macOS permissions, instead of
+  borrowing Terminal's;
+- pasting at the cursor with the clipboard restored afterwards;
+- dictation history, the status window and hang detection;
+- the research and measurements behind the model choices, and the documents in
+  [docs/](docs/).
+
+**Added in AirQuote** (Rob Simons):
+
+- the English redesign: floating bar, window, icon;
+- hands-free mode, the Start Dictation button and sound cues;
+- Dutch + English detection, custom vocabulary, and the translate, feedback and
+  rewrite modes;
+- the Recordings tab with speaker separation;
+- the Models tab with recommendations and a speed test;
+- `install.sh` and portable defaults;
+- fixes, including the audio deadlock that froze the app (very likely the hang noted in
+  PraatTypen's own README).
+
+Both PraatTypen and AirQuote were developed with [Claude Code](https://claude.com/claude-code).
+
+Speech recognition: [Whisper](https://github.com/openai/whisper) by OpenAI, via
+[mlx-whisper](https://github.com/ml-explore/mlx-examples). Speaker separation:
+[pyannote.audio](https://github.com/pyannote/pyannote-audio). See [NOTICE](NOTICE).
+
 ## License
 
-None yet: the original project has no license file. Ask the author before redistributing.
+None yet: the original project has no license file, so all rights to the original work
+remain with its author. Do not redistribute without his permission.
