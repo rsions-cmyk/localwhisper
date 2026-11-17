@@ -27,7 +27,7 @@ def test_app_bundle_builder_keeps_the_load_bearing_bits() -> None:
     assert "<key>LSUIElement</key><true/>" in text
     # The interpreter copy is what makes macOS attribute permissions to
     # PraatTypen instead of to org.python.python.
-    assert 'cp "$PY_STUB" "$CONTENTS/MacOS/praattypen-python"' in text
+    assert 'cp "$PY_STUB" "$CONTENTS/MacOS/airquote-python"' in text
 
 
 def test_double_click_launcher_calls_cli_launcher() -> None:

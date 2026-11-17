@@ -4,6 +4,8 @@ import wave
 from dataclasses import dataclass
 from pathlib import Path
 
+import threading
+
 import numpy as np
 
 from praattypen.logging_setup import get_logger
@@ -31,6 +33,10 @@ class Recording:
         write_wav(path, self.samples, self.sample_rate)
 
 
+# How long the microphone stays open after a dictation (see AudioRecorder).
+WARM_SECONDS = 30.0
+
+
 class AudioRecorder:
     def __init__(
         self,
@@ -43,6 +49,17 @@ class AudioRecorder:
         self.min_rms = min_rms
         self._stream = None
         self._frames: list[np.ndarray] = []
+        # Loudness (RMS) of the latest audio block, for the overlay's meter.
+        self.level = 0.0
+        # The stream stays open ("warm") between dictations and only this flag
+        # decides whether its audio is kept. Stopping a CoreAudio stream and
+        # starting another within ~50 ms -- exactly what a double-tap does --
+        # can deadlock PortAudio inside AudioOutputUnitStop, freezing the
+        # hotkey for good. A warm stream never stops in the middle of that.
+        self._collecting = False
+        self._lock = threading.Lock()
+        self._idle_timer: threading.Timer | None = None
+        self.warm_seconds = WARM_SECONDS
 
     def start(self) -> None:
         try:
@@ -52,17 +69,31 @@ class AudioRecorder:
                 "sounddevice is not installed. Install it with `.venv/bin/python -m pip install sounddevice`."
             ) from error
 
-        # A leftover stream means a previous stop failed, which happens when
-        # CoreAudio resets the input device across sleep/lock. That handle is
-        # dead: keeping it would make every later recording a silent no-op.
-        self._discard_stream()
+        self._cancel_idle_close()
+        with self._lock:
+            stream = self._stream
+            if stream is not None and getattr(stream, "active", False) is True:
+                # Warm stream from the previous dictation: just start keeping audio.
+                self._frames = []
+                self.level = 0.0
+                self._collecting = True
+                return
+            stale, self._stream = self._stream, None
+        # A leftover stream that is not running means CoreAudio reset the
+        # input device (sleep, lock, AirPods). That handle is dead: keeping it
+        # would make every later recording a silent no-op.
+        _close_quietly(stale)
 
         self._frames = []
+        self.level = 0.0
 
         def callback(indata, _frames, _time, status) -> None:
             if status:
                 logger.warning("Audiostatus: %s", status)
+            if not self._collecting:
+                return
             self._frames.append(indata.copy())
+            self.level = float(np.sqrt(np.mean(np.square(indata))))
 
         def open_stream():
             stream = sd.InputStream(
@@ -74,6 +105,7 @@ class AudioRecorder:
             stream.start()
             return stream
 
+        self._collecting = True
         try:
             self._stream = open_stream()
         except Exception as error:  # noqa: BLE001 - retried once below
@@ -84,13 +116,19 @@ class AudioRecorder:
             # list and trying once more fixes that without a restart.
             logger.warning("Microfoon openen mislukte (%s); audioapparaten opnieuw inlezen.", error)
             reinitialize_portaudio(sd)
-            self._stream = open_stream()
+            try:
+                self._stream = open_stream()
+            except Exception:
+                self._collecting = False
+                raise
 
     def stop_to_recording(self) -> Recording | None:
         if self._stream is None:
             return None
 
-        self._discard_stream()
+        self._collecting = False
+        self.level = 0.0
+        self._schedule_idle_close()
 
         frames, self._frames = self._frames, []
         if not frames:
@@ -118,6 +156,31 @@ class AudioRecorder:
             return None
 
         return Recording(samples=audio, sample_rate=self.sample_rate)
+
+    def _schedule_idle_close(self) -> None:
+        self._cancel_idle_close()
+        timer = threading.Timer(self.warm_seconds, self._close_if_idle)
+        timer.daemon = True
+        timer.start()
+        self._idle_timer = timer
+
+    def _cancel_idle_close(self) -> None:
+        timer, self._idle_timer = self._idle_timer, None
+        if timer is not None:
+            timer.cancel()
+
+    def _close_if_idle(self) -> None:
+        """Close the warm stream after a quiet spell, on the timer's thread.
+
+        The stream is detached under the lock but stopped outside it: if
+        CoreAudio ever hangs in the stop, only this throwaway thread waits,
+        and the next dictation simply opens a fresh stream.
+        """
+        with self._lock:
+            if self._collecting or self._stream is None:
+                return
+            stream, self._stream = self._stream, None
+        _close_quietly(stream)
 
     def _discard_stream(self) -> None:
         """Drop the current stream, surviving a failing stop/close.
@@ -203,3 +266,13 @@ def write_wav(path: Path, samples: np.ndarray, sample_rate: int) -> None:
         wav.setsampwidth(2)
         wav.setframerate(sample_rate)
         wav.writeframes(pcm.tobytes())
+
+
+def _close_quietly(stream) -> None:
+    if stream is None:
+        return
+    for step in (stream.stop, stream.close):
+        try:
+            step()
+        except Exception as error:  # noqa: BLE001 - a dead stream must not wedge the recorder
+            logger.error("Audiostream sluiten mislukte: %s", error)

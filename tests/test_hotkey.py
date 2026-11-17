@@ -225,3 +225,143 @@ def test_fn_pressed_from_quartz_flags() -> None:
     assert _fn_pressed_from_flags(0b1000, fn_mask)
     assert _fn_pressed_from_flags(0b1010, fn_mask)
     assert not _fn_pressed_from_flags(0b0010, fn_mask)
+
+
+def _clocked_controller(processed, events=None):
+    now = [100.0]
+    events = events if events is not None else []
+    controller = PushToTalkController(
+        FakeRecorder(),
+        processed.append,
+        clock=lambda: now[0],
+        on_started=lambda: events.append("started"),
+        on_hands_free=lambda: events.append("hands_free"),
+    )
+    return controller, now, events
+
+
+def test_double_tap_keeps_recording_after_release_until_next_tap() -> None:
+    processed: list[str] = []
+    controller, now, events = _clocked_controller(processed)
+
+    controller.press()
+    now[0] += 0.1
+    controller.release()  # first tap
+    now[0] += 0.15
+    controller.press()  # second tap, inside the debounce window
+    now[0] += 0.1
+    controller.release()
+
+    assert controller.recording and controller.hands_free
+    assert events[-1] == "hands_free"
+
+    now[0] += 20.0
+    controller.press()  # stop tap
+    assert not controller.recording and not controller.hands_free
+    now[0] += 0.1
+    controller.release()
+
+    assert processed[-1] == "audio.wav"
+    # The stop tap's release must not arm another double-tap.
+    now[0] += 0.2
+    controller.press()
+    assert not controller.hands_free
+
+
+def test_slow_second_press_is_a_normal_push_to_talk() -> None:
+    processed: list[str] = []
+    controller, now, events = _clocked_controller(processed)
+
+    controller.press()
+    now[0] += 0.1
+    controller.release()
+    now[0] += 1.0
+    controller.press()
+    now[0] += 2.0
+    controller.release()
+
+    assert not controller.recording
+    assert "hands_free" not in events
+
+
+def test_watchdog_leaves_hands_free_recording_alone_but_enforces_limit() -> None:
+    processed: list[str] = []
+    controller, now, _ = _clocked_controller(processed)
+    controller.max_recording_seconds = 60.0
+    state = _FnKeyState()
+    state.update(True, controller)
+    now[0] += 0.1
+    state.update(False, controller)
+    now[0] += 0.1
+    state.update(True, controller)
+    now[0] += 0.1
+    state.update(False, controller)
+    assert controller.hands_free
+
+    for _ in range(5):
+        watchdog_tick(controller, state, lambda: False, misses=1, strikes=2)
+    assert controller.recording
+
+    now[0] += 61.0
+    watchdog_tick(controller, state, lambda: False, misses=0, strikes=2)
+    assert not controller.recording and not controller.hands_free
+
+
+def test_modifier_hotkeys_use_left_right_specific_flag_bits() -> None:
+    from praattypen.hotkey import MODIFIER_KEYS
+
+    keycode, mask = MODIFIER_KEYS["right_option"]
+    assert keycode == 61
+    # Right Option down, while left Option is also held: right bit decides.
+    assert _fn_pressed_from_flags(0x80000 | 0x40 | 0x20, mask)
+    # Only left Option held: the shared Alternate flag is set, right bit is not.
+    assert not _fn_pressed_from_flags(0x80000 | 0x20, mask)
+
+
+def test_queued_controller_runs_presses_in_order_off_the_caller_thread() -> None:
+    import threading
+    import time as _time
+
+    from praattypen.hotkey import QueuedController
+
+    seen: list[str] = []
+    callers: list[str] = []
+
+    class Fake:
+        recording = False
+
+        def press(self) -> None:
+            callers.append(threading.current_thread().name)
+            seen.append("press")
+
+        def release(self, force: bool = False) -> None:
+            seen.append("release-force" if force else "release")
+
+    queued = QueuedController(Fake())
+    queued.press()
+    queued.release()
+    queued.release(force=True)
+    for _ in range(100):
+        if len(seen) == 3:
+            break
+        _time.sleep(0.01)
+    assert seen == ["press", "release", "release-force"]
+    assert callers == ["airquote-hotkey"]
+    assert queued.recording is False
+
+
+def test_start_button_runs_hands_free_and_stop_button_ends_it() -> None:
+    processed: list[str] = []
+    controller, now, events = _clocked_controller(processed)
+
+    controller.start_hands_free()
+    assert controller.recording and controller.hands_free
+    now[0] += 0.1
+    controller.release()  # a stray key release must not end it
+    assert controller.recording
+
+    now[0] += 5.0
+    controller.stop()
+    assert not controller.recording and not controller.hands_free
+    assert processed == ["audio.wav"]
+    controller.stop()  # stopping twice is harmless

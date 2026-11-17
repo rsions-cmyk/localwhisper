@@ -1,4 +1,4 @@
-"""Draw PraatTypen.icns: a microphone glyph on a rounded blue tile.
+"""Draw the AirQuote icon: a glowing spectrum orb with a quotation mark.
 
 Run by scripts/build_app.sh. Without an icon file the Dock shows a blank
 placeholder, which is exactly as uninformative as having no Dock icon at all.
@@ -16,7 +16,7 @@ from Foundation import NSMakeRect, NSMakeSize
 # macOS draws the tile itself at these sizes; iconutil wants every one of them.
 _SIZES = [16, 32, 128, 256, 512]
 _BACKGROUND = (0.13, 0.42, 0.92)
-_GLYPH = "mic.fill"
+_GLYPH = "quote.opening"
 
 
 def _tinted(glyph: AppKit.NSImage, color: AppKit.NSColor) -> AppKit.NSImage:
@@ -42,23 +42,48 @@ def _tinted(glyph: AppKit.NSImage, color: AppKit.NSColor) -> AppKit.NSImage:
 
 
 def draw_icon(size: int) -> AppKit.NSImage:
+    """Dark tile, glowing spectrum orb, white quotation mark: AirQuote."""
     image = AppKit.NSImage.alloc().initWithSize_(NSMakeSize(size, size))
     image.lockFocus()
+
+    def rgb(r, g, b, a=1.0):
+        return AppKit.NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, b, a)
 
     # macOS icons leave a margin; filling edge to edge looks oversized next to
     # every other Dock tile.
     inset = size * 0.08
     rect = NSMakeRect(inset, inset, size - 2 * inset, size - 2 * inset)
-    path = AppKit.NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
+    tile = AppKit.NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
         rect, size * 0.22, size * 0.22
     )
-    AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(*_BACKGROUND, 1.0).setFill()
-    path.fill()
+    AppKit.NSGradient.alloc().initWithStartingColor_endingColor_(
+        rgb(0.16, 0.10, 0.30), rgb(0.05, 0.05, 0.12)
+    ).drawInBezierPath_angle_(tile, -90)
 
-    glyph = AppKit.NSImage.imageWithSystemSymbolName_accessibilityDescription_(_GLYPH, "PraatTypen")
+    # Soft glow behind the orb.
+    centre = size / 2
+    radius = size * 0.27
+    glow = AppKit.NSGradient.alloc().initWithColors_(
+        [rgb(0.62, 0.40, 1.0, 0.55), rgb(1.0, 0.36, 0.66, 0.18), rgb(0.62, 0.40, 1.0, 0.0)]
+    )
+    tile.addClip()
+    glow.drawFromCenter_radius_toCenter_radius_options_(
+        (centre, centre), 0, (centre, centre), radius * 1.9, 0
+    )
+
+    orb_rect = NSMakeRect(centre - radius, centre - radius, 2 * radius, 2 * radius)
+    orb = AppKit.NSBezierPath.bezierPathWithOvalInRect_(orb_rect)
+    AppKit.NSGradient.alloc().initWithColors_(
+        [rgb(0.27, 0.55, 1.0), rgb(0.62, 0.40, 1.0), rgb(1.0, 0.36, 0.66), rgb(1.0, 0.62, 0.32)]
+    ).drawInBezierPath_angle_(orb, -35)
+    AppKit.NSGradient.alloc().initWithStartingColor_endingColor_(
+        rgb(1, 1, 1, 0.55), rgb(1, 1, 1, 0.0)
+    ).drawInBezierPath_relativeCenterPosition_(orb, (-0.35, 0.45))
+
+    glyph = AppKit.NSImage.imageWithSystemSymbolName_accessibilityDescription_(_GLYPH, "AirQuote")
     if glyph is not None:
         config = AppKit.NSImageSymbolConfiguration.configurationWithPointSize_weight_(
-            size * 0.5, AppKit.NSFontWeightMedium
+            size * 0.2, AppKit.NSFontWeightBold
         )
         glyph = _tinted(glyph.imageWithSymbolConfiguration_(config), AppKit.NSColor.whiteColor())
 

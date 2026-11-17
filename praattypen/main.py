@@ -11,14 +11,19 @@ from praattypen.config import default_config_path, load_config
 from praattypen.engines import create_engine
 from praattypen.hangwatch import start_hang_watch
 from praattypen.history import HistoryEntry, HistoryStore, format_duration
-from praattypen.hotkey import PushToTalkController, listen_push_to_talk
+from praattypen.hotkey import PushToTalkController, QueuedController, listen_push_to_talk
 from praattypen.inject import ClipboardInjector
 from praattypen.logging_setup import get_logger, setup_logging
 from praattypen.menubar import create_menu_bar
 from praattypen.overlay import create_overlay
+from praattypen.sounds import SoundCues
 from praattypen.permissions import log_permissions
 from praattypen.pipeline import DictationPipeline
 from praattypen.statuswindow import create_status_window
+from praattypen.vocabulary import Vocabulary
+from praattypen.batch import BatchQueue, MeetingRecorder
+from praattypen.models_catalog import set_config_model
+from praattypen.modes import ModeState, ModeTransformer
 from praattypen.storage import auto_clean_cache, cache_plan, format_bytes, remove_paths
 from praattypen.worker import TranscriptionWorker
 
@@ -70,6 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Toon de volledige transcripten in plaats van een samenvatting per regel.",
     )
 
+    subparsers.add_parser("benchmark", help="Speed-test every installed speech model.")
     cache_parser = subparsers.add_parser("cache", help="Show local model and temp-audio cache usage.")
     cache_parser.add_argument("--config", default=None, help="Path to config.yaml.")
 
@@ -103,13 +109,26 @@ def run(config_path: str | Path) -> None:
     log_permissions()
     maybe_auto_clean_cache(config)
 
-    engine = create_engine(config)
+    vocabulary = Vocabulary()
+    modes = ModeState()
+    transformer = ModeTransformer(modes, model=config.assistant_model)
+    engine = create_engine(
+        config, prompt_source=vocabulary.prompt, task_source=modes.whisper_task
+    )
     injector = ClipboardInjector()
     history = HistoryStore(enabled=config.history_enabled, max_entries=config.history_size)
     # Before any window or status item exists, so nothing else has already
     # pinned the app to "no Dock icon".
     apply_activation_policy(config.dock_icon)
-    overlay = create_overlay(enabled=config.overlay_enabled)
+    recorder = AudioRecorder(
+        sample_rate=config.sample_rate,
+        min_duration_seconds=config.min_speech_seconds,
+        min_rms=config.min_speech_rms,
+    )
+    sounds = SoundCues(enabled=config.sounds_enabled, volume=config.sound_volume)
+    overlay = create_overlay(
+        enabled=config.overlay_enabled, level_source=lambda: recorder.level
+    )
     status_window = create_status_window(
         enabled=config.status_window_enabled,
         config=config,
@@ -119,6 +138,10 @@ def run(config_path: str | Path) -> None:
         config_path=Path(config_path),
         log_path=log_path,
         repaste=injector.inject,
+        vocabulary=vocabulary,
+        modes=modes,
+        switch_model=lambda value: switch_model(value),
+        toggle_dictation=lambda: toggle_dictation(),
     )
     menu_bar = create_menu_bar(
         enabled=config.menu_bar_enabled,
@@ -127,17 +150,15 @@ def run(config_path: str | Path) -> None:
         log_path=log_path,
         repaste=injector.inject,
         show_window=status_window.show,
+        modes=modes,
     )
     pipeline = DictationPipeline(
         engine=engine,
         cleanup=CleanupService(config.cleanup),
         inject=injector.inject,
         on_status=_status,
-    )
-    recorder = AudioRecorder(
-        sample_rate=config.sample_rate,
-        min_duration_seconds=config.min_speech_seconds,
-        min_rms=config.min_speech_rms,
+        fix_casing=vocabulary.apply_casing,
+        transform=transformer.transform,
     )
 
     def idle() -> None:
@@ -150,6 +171,8 @@ def run(config_path: str | Path) -> None:
         try:
             text = pipeline.process_recording(recording)
             if text:
+                overlay.show_done(pipeline.last_pasted)
+                sounds.done()
                 menu_bar.set_last_transcript(text)
                 history.add(
                     HistoryEntry(
@@ -167,15 +190,23 @@ def run(config_path: str | Path) -> None:
 
     def on_stopped(recording: Recording) -> None:
         _status(f"Opname gestopt ({recording.duration_seconds:.1f}s), in de wachtrij.")
-        overlay.show_processing()
+        sounds.stop()
+        overlay.show_processing(modes.current.working)
         menu_bar.set_processing()
         status_window.set_processing()
 
     def on_started() -> None:
         _status("Opname gestart.")
+        sounds.start()
+        transformer.capture()
         overlay.show_listening()
         menu_bar.set_listening()
         status_window.set_listening()
+
+    def on_hands_free() -> None:
+        _status("Handsfree-opname: tik de sneltoets opnieuw om te stoppen.")
+        sounds.hands_free()
+        overlay.show_hands_free()
 
     def on_skipped() -> None:
         _status("Opname overgeslagen: te kort of te stil. Houd Fn langer ingedrukt en praat duidelijk.")
@@ -183,7 +214,28 @@ def run(config_path: str | Path) -> None:
 
     def on_failed(error: BaseException) -> None:
         _status(f"Opname mislukt: {error}")
+        sounds.error()
         idle()
+
+    batch = BatchQueue(
+        model=getattr(engine, "model", config.models.whisper),
+        allowed_languages=(
+            [] if config.language == "auto"
+            else [part.strip() for part in config.language.split(",") if part.strip()]
+        ),
+        prompt_source=vocabulary.prompt,
+        fix_casing=vocabulary.apply_casing,
+        on_update=status_window.update_job,
+    )
+    status_window.attach_batch(batch, MeetingRecorder(), on_finished=sounds.done)
+
+    def switch_model(value: str) -> None:
+        """Models tab: use another speech model from now on."""
+        set_config_model(Path(config_path), value)
+        engine.model = value
+        batch.model = value
+        _status(f"Spraakmodel gewisseld naar {value}.")
+        worker.submit_task(engine.warm_up)
 
     worker = TranscriptionWorker(process_recording, on_error=lambda error: _status(f"Fout: {error}"))
     # Load the model now, on the worker thread, so the first dictation of the
@@ -197,7 +249,26 @@ def run(config_path: str | Path) -> None:
         on_skipped=on_skipped,
         on_failed=on_failed,
         max_recording_seconds=config.max_recording_seconds,
+        on_hands_free=on_hands_free,
     )
+
+    queued = QueuedController(controller)
+    overlay.set_click_handler(queued.stop)
+
+    def toggle_dictation() -> None:
+        """Window button (main thread): start or stop a hands-free dictation.
+
+        AirQuote steps aside first, so the text lands in the app you were
+        using, not in the AirQuote window you just clicked.
+        """
+        from PyObjCTools import AppHelper
+        import AppKit
+
+        AppKit.NSApplication.sharedApplication().hide_(None)
+        if controller.recording:
+            AppHelper.callLater(0.35, queued.stop)
+        else:
+            AppHelper.callLater(0.35, queued.start_hands_free)
 
     hang_watch = start_hang_watch()
 
@@ -206,7 +277,7 @@ def run(config_path: str | Path) -> None:
         "laat los om te transcriberen en plakken. Stoppen kan via de menubalk of Ctrl+C."
     )
     try:
-        listen_push_to_talk(config.hotkey, controller)
+        listen_push_to_talk(config.hotkey, queued)
     except KeyboardInterrupt:
         _status("Gestopt.")
     finally:
@@ -312,6 +383,22 @@ def _path_size(path: Path) -> int:
     return dir_size(path)
 
 
+def run_benchmark(config_path) -> int:
+    from praattypen import benchmark
+    from praattypen import models_catalog as catalog
+
+    config = load_config(config_path)
+    models = [
+        (model.repo, str(path))
+        for model in catalog.CATALOG
+        if (path := catalog.local_path(model.repo)) is not None
+    ]
+    results = benchmark.run(models, restore=config.models.whisper, on_progress=print)
+    for repo, _ in models:
+        print(f"{repo}\n  {benchmark.summary(results[repo])}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -323,6 +410,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "history":
         show_history(config_path, limit=args.limit, full=args.full)
         return 0
+    if args.command == "benchmark":
+        return run_benchmark(config_path)
     if args.command == "cache":
         show_cache(config_path)
         return 0

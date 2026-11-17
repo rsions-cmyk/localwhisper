@@ -49,11 +49,11 @@ def build_app_menu() -> None:
     main_menu.addItem_(app_item)
 
     app_menu = AppKit.NSMenu.alloc().init()
-    app_menu.addItemWithTitle_action_keyEquivalent_("Over PraatTypen", "orderFrontStandardAboutPanel:", "")
+    app_menu.addItemWithTitle_action_keyEquivalent_("About AirQuote", "orderFrontStandardAboutPanel:", "")
     app_menu.addItem_(AppKit.NSMenuItem.separatorItem())
-    app_menu.addItemWithTitle_action_keyEquivalent_("Verberg PraatTypen", "hide:", "h")
+    app_menu.addItemWithTitle_action_keyEquivalent_("Hide AirQuote", "hide:", "h")
     app_menu.addItem_(AppKit.NSMenuItem.separatorItem())
-    app_menu.addItemWithTitle_action_keyEquivalent_("Stop PraatTypen", "terminate:", "q")
+    app_menu.addItemWithTitle_action_keyEquivalent_("Quit AirQuote", "terminate:", "q")
     app_item.setSubmenu_(app_menu)
 
     app.setMainMenu_(main_menu)

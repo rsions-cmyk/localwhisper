@@ -1,5 +1,5 @@
-hotkey: "fn"
-language: "nl"
+hotkey: "right_option"
+language: "nl,en"  # detecteert Nederlands of Engels; bij twijfel Nederlands
 engine: "local_whisper"
 cloud_boost: false
 cleanup:
@@ -8,7 +8,7 @@ cleanup:
   model: "qwen2.5:3b"
   remove_fillers: true
 models:
-  whisper: "mlx-community/whisper-large-v3-turbo-q4"
+  whisper: "/Users/robsimons/.omlx/models/mlx-community/whisper-large-v3-mlx"
   parakeet: "mlx-community/parakeet-tdt-0.6b-v3"
   groq: "whisper-large-v3-turbo"
 paste_method: "clipboard"
@@ -27,6 +27,11 @@ max_model_cache_gb: 3.0
 # Toon een zwevend statusbalkje (zoals Wispr Flow) terwijl Fn ingedrukt wordt
 # gehouden en tijdens het transcriberen. Zet op false om dit uit te schakelen.
 overlay_enabled: true
+# Zachte geluidjes bij starten, stoppen en plakken (0.0 - 1.0).
+sounds_enabled: true
+sound_volume: 0.25
+# Lokaal Ollama-model voor de modi "Translate to Dutch" en "Student Feedback".
+assistant_model: "gemma4:12b"
 # Toon het PraatTypen-icoon in de menubalk, met status, "plak opnieuw" en stop.
 menu_bar_enabled: true
 # Toon PraatTypen in de Dock, zodat je kunt zien of hij draait. Uitzetten maakt

@@ -143,4 +143,4 @@ def test_preview_keeps_short_text_intact() -> None:
 def test_format_duration_scales_with_size() -> None:
     assert format_duration(4.25) == "4.2s"
     assert format_duration(95) == "1m 35s"
-    assert format_duration(3725) == "1u 02m"
+    assert format_duration(3725) == "1h 02m"

@@ -9,7 +9,7 @@ class CloudGroqEngine(TranscriptionEngine):
     name = "cloud_groq"
 
     def __init__(self, language: str = "nl", model: str = "whisper-large-v3-turbo") -> None:
-        self.language = None if language == "auto" else language
+        self.language = None if language == "auto" or "," in language else language
         self.model = model
 
     def transcribe(self, audio_path: Path) -> str:

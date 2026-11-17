@@ -32,7 +32,12 @@ class DictationPipeline:
         cleanup: Cleanup,
         inject,
         on_status: Callable[[str], None] | None = None,
+        fix_casing: Callable[[str], str] | None = None,
+        transform: Callable[[str], str] | None = None,
     ) -> None:
+        self.fix_casing = fix_casing or (lambda text: text)
+        # Mode step (translation, feedback) after cleanup, before casing.
+        self.transform = transform or (lambda text: text)
         self.engine = engine
         self.cleanup = cleanup
         self.inject = inject
@@ -57,7 +62,7 @@ class DictationPipeline:
             return ""
 
         self.on_status(f"Transcript: {transcript}")
-        cleaned = self.cleanup.clean(transcript).strip()
+        cleaned = self.fix_casing(self.transform(self.cleanup.clean(transcript).strip()).strip())
         if not cleaned:
             self.on_status("Opschoning gaf lege tekst terug.")
             return ""

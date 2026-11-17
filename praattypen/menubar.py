@@ -45,9 +45,9 @@ class NullMenuBar:
 
 # Idle deliberately uses the outline symbol and listening the filled one: the
 # difference is legible in the menu bar at a glance, tint alone is not.
-_IDLE = ("mic", "Klaar", None)
-_LISTENING = ("mic.fill", "Luistert...", (0.95, 0.25, 0.25))
-_PROCESSING = ("waveform", "Transcriberen...", (0.95, 0.65, 0.15))
+_IDLE = ("mic", "Ready", None)
+_LISTENING = ("mic.fill", "Listening…", (0.95, 0.25, 0.25))
+_PROCESSING = ("waveform", "Transcribing…", (0.95, 0.65, 0.15))
 
 # Long enough for the menu to be gone before Cmd+V fires.
 _MENU_DISMISS_SECONDS = 0.15
@@ -113,8 +113,12 @@ class RecordingMenuBar:
         repaste: Callable[[str], None] | None = None,
         quit_app: Callable[[], None] | None = None,
         show_window: Callable[[], None] | None = None,
+        modes=None,
     ) -> None:
         import AppKit
+
+        self._modes = modes
+        self._mode_items = {}
 
         self._AppKit = AppKit
         self._engine_name = engine_name
@@ -153,26 +157,45 @@ class RecordingMenuBar:
         # the plain status line in a way that reads as "broken".
         menu.setAutoenablesItems_(False)
 
-        self._status_item = self._add_item(menu, "Klaar", None)
+        self._status_item = self._add_item(menu, "Ready", None)
         self._status_item.setEnabled_(False)
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
 
         if self._show_window is not None:
-            self._add_item(menu, "Statusvenster openen", self._show_window)
+            self._add_item(menu, "Open AirQuote…", self._show_window)
+            menu.addItem_(AppKit.NSMenuItem.separatorItem())
+
+        if self._modes is not None:
+            from praattypen.modes import MODES
+
+            mode_menu = AppKit.NSMenu.alloc().init()
+            mode_menu.setAutoenablesItems_(False)
+            for mode in MODES:
+                item = self._add_item(
+                    mode_menu, mode.title, lambda key=mode.key: self._modes.set(key)
+                )
+                self._mode_items[mode.key] = item
+            mode_root = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                "Mode", None, ""
+            )
+            mode_root.setSubmenu_(mode_menu)
+            menu.addItem_(mode_root)
+            self._sync_modes()
+            self._modes.subscribe(lambda _mode: AppHelper_call(self._sync_modes))
             menu.addItem_(AppKit.NSMenuItem.separatorItem())
 
         self._repaste_item = self._add_item(
-            menu, "Laatste transcript opnieuw plakken", self._repaste_last
+            menu, "Paste Last Dictation", self._repaste_last
         )
         self._repaste_item.setEnabled_(False)
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
 
-        self._add_item(menu, "Config openen", lambda: self._open(self._config_path))
+        self._add_item(menu, "Open Settings File", lambda: self._open(self._config_path))
         if self._log_path is not None:
-            self._add_item(menu, "Log openen", lambda: self._open(self._log_path))
+            self._add_item(menu, "Open Log", lambda: self._open(self._log_path))
         menu.addItem_(AppKit.NSMenuItem.separatorItem())
 
-        self._add_item(menu, "Stop PraatTypen", self._quit_app or self._terminate)
+        self._add_item(menu, "Quit AirQuote", self._quit_app or self._terminate)
 
         self._item.setMenu_(menu)
         # Whatever happened while the loop was still starting.
@@ -225,6 +248,13 @@ class RecordingMenuBar:
         menu.addItem_(item)
         return item
 
+    def _sync_modes(self) -> None:
+        if self._modes is None:
+            return
+        current = self._modes.current.key
+        for key, item in self._mode_items.items():
+            item.setState_(1 if key == current else 0)
+
     def _apply(self, state: tuple[str, str, tuple[float, float, float] | None]) -> None:
         AppKit = self._AppKit
         symbol, label, tint = state
@@ -237,7 +267,7 @@ class RecordingMenuBar:
 
         button = self._item.button()
         image = AppKit.NSImage.imageWithSystemSymbolName_accessibilityDescription_(
-            symbol, f"PraatTypen: {label}"
+            symbol, f"AirQuote: {label}"
         )
         if image is not None:
             # SF Symbols arrive at their natural point size, which a status
@@ -248,7 +278,7 @@ class RecordingMenuBar:
             button.setImage_(image)
         else:
             # Pre-Big Sur, or a symbol this macOS does not know.
-            button.setTitle_("PT")
+            button.setTitle_("AQ")
         button.setContentTintColor_(
             None
             if tint is None
@@ -262,7 +292,7 @@ class RecordingMenuBar:
             return
         self._repaste_item.setEnabled_(bool(text))
         self._repaste_item.setTitle_(
-            f"Plak opnieuw: {_shorten(text)}" if text else "Laatste transcript opnieuw plakken"
+            f"Paste Again: {_shorten(text)}" if text else "Paste Last Dictation"
         )
 
     def _repaste_last(self) -> None:
@@ -299,6 +329,12 @@ class RecordingMenuBar:
         AppHelper.callAfter(func, *args, **kwargs)
 
 
+def AppHelper_call(func) -> None:
+    from PyObjCTools import AppHelper
+
+    AppHelper.callAfter(func)
+
+
 def _shorten(text: str, limit: int = 40) -> str:
     collapsed = " ".join(text.split())
     if len(collapsed) <= limit:
@@ -314,6 +350,7 @@ def create_menu_bar(
     repaste: Callable[[str], None] | None = None,
     quit_app: Callable[[], None] | None = None,
     show_window: Callable[[], None] | None = None,
+    modes=None,
 ) -> MenuBar:
     """Build the menu-bar item, falling back to a no-op silently.
 
@@ -331,6 +368,7 @@ def create_menu_bar(
             repaste=repaste,
             quit_app=quit_app,
             show_window=show_window,
+            modes=modes,
         )
     except ImportError as error:
         logger.warning(

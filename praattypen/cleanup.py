@@ -44,12 +44,25 @@ def build_cleanup_prompt(text: str, remove_fillers: bool = True) -> str:
     )
 
 
-def ollama_generate(prompt: str, model: str, timeout: float) -> str:
+def ollama_generate(
+    prompt: str,
+    model: str,
+    timeout: float,
+    think: bool | None = None,
+    keep_alive: str | None = None,
+) -> str:
     import requests
 
+    payload: dict = {"model": model, "prompt": prompt, "stream": False}
+    if think is not None:
+        # Reasoning models (gemma4, qwen3) otherwise write ~4x more tokens of
+        # hidden "thinking" first, which is pure waiting time for dictation.
+        payload["think"] = think
+    if keep_alive is not None:
+        payload["keep_alive"] = keep_alive
     response = requests.post(
         "http://127.0.0.1:11434/api/generate",
-        json={"model": model, "prompt": prompt, "stream": False},
+        json=payload,
         timeout=timeout,
     )
     response.raise_for_status()

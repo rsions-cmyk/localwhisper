@@ -29,7 +29,7 @@ def test_current_local_model_repos_keeps_configured_local_models() -> None:
         ),
     )
 
-    assert current_local_model_repos(config) == {
+    assert current_local_model_repos(config) >= {
         "mlx-community/whisper-large-v3-turbo-q4",
         "mlx-community/parakeet-tdt-0.6b-v3",
     }
@@ -119,3 +119,18 @@ def test_auto_clean_cache_does_nothing_when_under_limit(tmp_path: Path) -> None:
 
     assert result.removed_paths == 0
     assert stale.exists()
+
+
+def test_cache_plan_never_removes_models_offered_in_the_models_tab(tmp_path) -> None:
+    from praattypen.config import AppConfig, ModelsConfig
+    from praattypen.models_catalog import CATALOG
+    from praattypen.storage import cache_plan, model_cache_dir_name
+
+    for model in CATALOG:
+        (tmp_path / model_cache_dir_name(model.repo)).mkdir()
+    (tmp_path / "models--mlx-community--whisper-tiny").mkdir()
+    config = AppConfig(models=ModelsConfig(whisper="/somewhere/else/whisper-large-v3-mlx"))
+
+    plan = cache_plan(config, hub_dir=tmp_path, temp_dir=tmp_path)
+
+    assert [path.name for path in plan.remove] == ["models--mlx-community--whisper-tiny"]

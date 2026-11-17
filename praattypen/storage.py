@@ -35,7 +35,12 @@ def huggingface_hub_dir() -> Path:
 
 
 def current_local_model_repos(config: AppConfig) -> set[str]:
-    return {config.models.whisper, config.models.parakeet}
+    # Every model the Models tab offers is one you may switch back to, so the
+    # automatic clean-up must never take it away -- only leftovers it does
+    # not know. (It once removed a model mid-download for exactly this.)
+    from praattypen.models_catalog import CATALOG
+
+    return {config.models.whisper, config.models.parakeet} | {model.repo for model in CATALOG}
 
 
 def model_cache_dir_name(repo_id: str) -> str:

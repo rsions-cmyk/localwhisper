@@ -16,6 +16,11 @@ logger = get_logger(__name__)
 WATCHDOG_INTERVAL_SECONDS = 2.0
 WATCHDOG_STRIKES = 2
 DEFAULT_MAX_RECORDING_SECONDS = 900.0
+# Hands-free mode: a press released within TAP_SECONDS counts as a tap, and a
+# second press within DOUBLE_TAP_SECONDS of that tap starts a recording that
+# keeps running after release. The next press stops it.
+TAP_SECONDS = 0.3
+DOUBLE_TAP_SECONDS = 0.45
 
 
 class Recorder(Protocol):
@@ -38,7 +43,17 @@ class PushToTalkController:
         on_skipped: Callable[[], None] | None = None,
         on_failed: Callable[[BaseException], None] | None = None,
         max_recording_seconds: float = DEFAULT_MAX_RECORDING_SECONDS,
+        on_hands_free: Callable[[], None] | None = None,
+        tap_seconds: float = TAP_SECONDS,
+        double_tap_seconds: float = DOUBLE_TAP_SECONDS,
     ) -> None:
+        self.on_hands_free = on_hands_free or _noop
+        self.tap_seconds = tap_seconds
+        self.double_tap_seconds = double_tap_seconds
+        # True while a double-tap recording runs without the key held down.
+        self.hands_free = False
+        self._last_tap = float("-inf")
+        self._swallow_release = False
         self.recorder = recorder
         self.process_audio = process_audio
         self.debounce_seconds = debounce_seconds
@@ -58,8 +73,19 @@ class PushToTalkController:
     def press(self) -> None:
         with self._lock:
             now = self.clock()
-            if self.recording or now - self._last_transition < self.debounce_seconds:
+            if self.recording:
+                if self.hands_free:
+                    # The tap that ends a hands-free recording; its release
+                    # must not count as the first half of a new double-tap.
+                    self._swallow_release = True
+                    self._finish(now)
                 return
+            double_tap = now - self._last_tap <= self.double_tap_seconds
+            # The debounce guards against key bounce, but the second tap of a
+            # double-tap always arrives inside it and must not be swallowed.
+            if not double_tap and now - self._last_transition < self.debounce_seconds:
+                return
+            self._last_tap = float("-inf")
             self.recording = True
             self._last_transition = now
             self._recording_started = now
@@ -70,13 +96,47 @@ class PushToTalkController:
                 self.on_failed(error)
                 return
             self.on_started()
+            if double_tap:
+                self.hands_free = True
+                self.on_hands_free()
 
-    def release(self) -> None:
+    def start_hands_free(self) -> None:
+        """Start a recording that runs until stop(), as a double-tap does."""
+        with self._lock:
+            if self.recording:
+                return
+            self._last_tap = self.clock()  # makes press() treat this as a double-tap
+            self._last_transition = float("-inf")
+        self.press()
+
+    def stop(self) -> None:
+        """End whatever recording is running (button, click on the bar)."""
         with self._lock:
             if not self.recording:
                 return
+            self._swallow_release = False
+            self._finish(self.clock())
+
+    def release(self, force: bool = False) -> None:
+        with self._lock:
+            if self._swallow_release and not force:
+                self._swallow_release = False
+                return
+            if not self.recording or (self.hands_free and not force):
+                return
+            now = self.clock()
+            if not force and now - self._recording_started <= self.tap_seconds:
+                # A tap, maybe the first half of a double-tap. Its audio still
+                # goes through the normal path, where the minimum-speech check
+                # drops it as too short.
+                self._last_tap = now
+            self._finish(now)
+
+    def _finish(self, now: float) -> None:
+        with self._lock:
             self.recording = False
-            self._last_transition = self.clock()
+            self.hands_free = False
+            self._last_transition = now
             try:
                 recording = self.recorder.stop_to_recording()
             except Exception as error:  # noqa: BLE001 - otherwise the overlay hangs on "Luistert"
@@ -103,9 +163,84 @@ class PushToTalkController:
         return self.recording_seconds() >= self.max_recording_seconds
 
 
+# Modifier keys get our own Quartz tap (like Fn) instead of pynput: pynput
+# never re-enables a tap that macOS switched off, which silently killed the
+# hotkey after a burst of presses (a double-tap). Each entry is the virtual
+# keycode and the device-dependent flag bit that tells left from right.
+MODIFIER_KEYS = {
+    "right_option": (61, 0x40),
+    "right_alt": (61, 0x40),
+    "left_option": (58, 0x20),
+    "left_alt": (58, 0x20),
+    "right_command": (54, 0x10),
+    "right_cmd": (54, 0x10),
+    "left_command": (55, 0x08),
+    "left_cmd": (55, 0x08),
+    "right_control": (62, 0x2000),
+    "right_ctrl": (62, 0x2000),
+    "left_control": (59, 0x01),
+    "left_ctrl": (59, 0x01),
+    "right_shift": (60, 0x04),
+    "left_shift": (56, 0x02),
+}
+
+
+class QueuedController:
+    """Hands press/release to a worker thread, in order.
+
+    The event tap callback must return quickly or macOS switches the tap off;
+    opening and closing the microphone is too slow to do inside it, and a
+    double-tap does both twice in under half a second.
+    """
+
+    def __init__(self, controller: PushToTalkController) -> None:
+        import queue
+
+        self._controller = controller
+        self._queue: queue.SimpleQueue = queue.SimpleQueue()
+        threading.Thread(target=self._run, daemon=True, name="airquote-hotkey").start()
+
+    def press(self) -> None:
+        self._queue.put(("press", False))
+
+    def release(self, force: bool = False) -> None:
+        self._queue.put(("release", force))
+
+    def start_hands_free(self) -> None:
+        self._queue.put(("start", False))
+
+    def stop(self) -> None:
+        self._queue.put(("stop", False))
+
+    def _run(self) -> None:
+        while True:
+            action, force = self._queue.get()
+            try:
+                if action == "press":
+                    _timed("Sneltoets ingedrukt", self._controller.press)
+                elif action == "start":
+                    _timed("Start-knop", self._controller.start_hands_free)
+                elif action == "stop":
+                    _timed("Stop-knop", self._controller.stop)
+                else:
+                    _timed("Sneltoets losgelaten", lambda: self._controller.release(force=force))
+            except Exception as error:  # noqa: BLE001 - the hotkey must survive
+                logger.error("Fout bij sneltoets: %s", error)
+
+    def __getattr__(self, name):
+        return getattr(self._controller, name)
+
+
 def listen_push_to_talk(hotkey: str, controller: PushToTalkController) -> None:
-    if _is_fn_hotkey(hotkey):
+    key = hotkey.strip().lower()
+    if not isinstance(controller, QueuedController):
+        controller = QueuedController(controller)  # type: ignore[assignment]
+    if _is_fn_hotkey(key):
         listen_fn_push_to_talk(controller)
+        return
+    if key in MODIFIER_KEYS:
+        keycode, device_mask = MODIFIER_KEYS[key]
+        listen_fn_push_to_talk(controller, mask=device_mask, keycode=keycode)
         return
 
     try:
@@ -138,7 +273,9 @@ def listen_push_to_talk(hotkey: str, controller: PushToTalkController) -> None:
         AppKit.NSApplication.sharedApplication().run()
 
 
-def listen_fn_push_to_talk(controller: PushToTalkController) -> None:
+def listen_fn_push_to_talk(
+    controller: PushToTalkController, mask: int | None = None, keycode: int | None = None
+) -> None:
     try:
         import Quartz
     except ImportError as error:
@@ -146,7 +283,8 @@ def listen_fn_push_to_talk(controller: PushToTalkController) -> None:
             "Quartz/PyObjC is not installed. Install pynput or pyobjc-framework-Quartz."
         ) from error
 
-    fn_mask = Quartz.kCGEventFlagMaskSecondaryFn
+    # Fn by default; a modifier key passes its own left/right flag bit.
+    fn_mask = mask if mask is not None else Quartz.kCGEventFlagMaskSecondaryFn
     event_mask = Quartz.CGEventMaskBit(Quartz.kCGEventFlagsChanged)
     disabled_types = {
         Quartz.kCGEventTapDisabledByTimeout,
@@ -216,6 +354,10 @@ def listen_fn_push_to_talk(controller: PushToTalkController) -> None:
         )
 
     def fn_really_pressed() -> bool:
+        if keycode is not None:
+            return bool(
+                Quartz.CGEventSourceKeyState(Quartz.kCGEventSourceStateCombinedSessionState, keycode)
+            )
         flags = Quartz.CGEventSourceFlagsState(Quartz.kCGEventSourceStateCombinedSessionState)
         return _fn_pressed_from_flags(flags, fn_mask)
 
@@ -303,7 +445,7 @@ class _FnKeyState:
     def force_release(self, controller: PushToTalkController) -> None:
         with self._lock:
             self.pressed = False
-        controller.release()
+        controller.release(force=True)
 
 
 def start_watchdog(
@@ -355,6 +497,9 @@ def watchdog_tick(
             "Opname langer dan %.0fs: automatisch gestopt.", controller.max_recording_seconds
         )
         state.force_release(controller)
+        return 0
+    # Hands-free recordings run with the key up on purpose.
+    if controller.hands_free:
         return 0
     # One stray reading is not enough: only a sustained mismatch means the
     # release was really missed, so a long dictation is never cut short.

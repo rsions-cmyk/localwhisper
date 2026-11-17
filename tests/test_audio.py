@@ -93,13 +93,34 @@ def test_stop_to_recording_keeps_audio_when_closing_the_stream_fails() -> None:
     assert recording.duration_seconds == 1.0
 
 
-def test_stop_to_recording_clears_the_stream_even_when_closing_fails() -> None:
+def test_stop_keeps_the_stream_warm_and_idle_close_survives_a_failing_stop() -> None:
     recorder = AudioRecorder()
-    recorder._stream = FakeStream(fail_on_stop=True)
+    stream = FakeStream(fail_on_stop=True)
+    recorder._stream = stream
 
     recorder.stop_to_recording()
+    assert recorder._stream is stream  # warm: no stop/start churn on a double-tap
 
+    recorder._close_if_idle()
     assert recorder._stream is None
+    recorder._cancel_idle_close()
+
+
+def test_start_reuses_a_warm_running_stream(monkeypatch) -> None:
+    recorder = AudioRecorder()
+    warm = FakeStream()
+    warm.active = True
+    recorder._stream = warm
+    monkeypatch.setattr(
+        "sounddevice.InputStream",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("must not reopen")),
+        raising=False,
+    )
+
+    recorder.start()
+
+    assert recorder._stream is warm
+    assert recorder._collecting
 
 
 def test_start_replaces_a_stream_left_behind_by_a_failed_stop(monkeypatch) -> None:

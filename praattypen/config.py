@@ -54,6 +54,10 @@ class AppConfig:
     status_window_enabled: bool = True
     history_enabled: bool = True
     history_size: int = 200
+    sounds_enabled: bool = True
+    sound_volume: float = 0.25
+    # Local Ollama model for the "to Dutch" and "Feedback" modes.
+    assistant_model: str = "gemma4:12b"
 
 
 def load_config(path: str | Path = "config.yaml") -> AppConfig:
