@@ -36,7 +36,11 @@ extra opschoonstap. Hoe dat zit staat in [docs/MODELLEN.md](docs/MODELLEN.md).
 
 ### 1. Code op de goede plek zetten
 
-Zet de map in `~/Developer/praattypen` of een andere map, maar **niet** in `~/Documents`,
+```bash
+git clone https://github.com/sebastiaanvankemenade-commits/localwhisper.git ~/Developer/praattypen
+```
+
+Een andere map kan ook, maar **niet** `~/Documents`,
 `~/Desktop` of `~/Downloads`. Die mappen zijn door macOS afgeschermd (TCC). Daar kan de
 app zijn eigen code niet lezen en krijg je `PermissionError: Operation not permitted`.
 Vanuit Terminal werkt het dan wél, en dat maakt het extra verwarrend.
