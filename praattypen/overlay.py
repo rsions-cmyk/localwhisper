@@ -140,6 +140,11 @@ class RecordingOverlay:
         glass.setBlendingMode_(AppKit.NSVisualEffectBlendingModeBehindWindow)
         glass.setState_(AppKit.NSVisualEffectStateActive)
         glass.setAppearance_(AppKit.NSAppearance.appearanceNamed_(AppKit.NSAppearanceNameDarkAqua))
+        # The window server draws the blur itself and ignores the layer's
+        # corner radius, so without a mask image the rectangular glass shows
+        # in the corners (white on a light background). A pill-shaped mask
+        # shapes the blur and the window shadow alike.
+        glass.setMaskImage_(_pill_mask(width, height))
         glass.setWantsLayer_(True)
         glass.layer().setCornerRadius_(height / 2)
         glass.layer().setMasksToBounds_(True)
@@ -480,6 +485,22 @@ class RecordingOverlay:
                 CGRectMake(frame.origin.x, (area - bar_height) / 2, self._BAR_WIDTH, bar_height)
             )
         CATransaction.commit()
+
+
+def _pill_mask(width: float, height: float):
+    """A black pill on transparent, as an NSVisualEffectView mask image."""
+    import AppKit
+    from Foundation import NSMakeRect, NSMakeSize
+
+    radius = height / 2
+    image = AppKit.NSImage.alloc().initWithSize_(NSMakeSize(width, height))
+    image.lockFocus()
+    AppKit.NSColor.blackColor().set()
+    AppKit.NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
+        NSMakeRect(0, 0, width, height), radius, radius
+    ).fill()
+    image.unlockFocus()
+    return image
 
 
 def _mix(a, b, t: float):
