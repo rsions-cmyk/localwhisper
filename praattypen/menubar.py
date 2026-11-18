@@ -175,6 +175,12 @@ class RecordingMenuBar:
                     mode_menu, mode.title, lambda key=mode.key: self._modes.set(key)
                 )
                 self._mode_items[mode.key] = item
+            mode_menu.addItem_(AppKit.NSMenuItem.separatorItem())
+            self._commands_item = self._add_item(
+                mode_menu,
+                "Voice Commands",
+                lambda: self._modes.set_commands(not self._modes.commands_enabled),
+            )
             mode_root = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
                 "Mode", None, ""
             )
@@ -254,6 +260,9 @@ class RecordingMenuBar:
         current = self._modes.current.key
         for key, item in self._mode_items.items():
             item.setState_(1 if key == current else 0)
+        item = getattr(self, "_commands_item", None)
+        if item is not None:
+            item.setState_(1 if self._modes.commands_enabled else 0)
 
     def _apply(self, state: tuple[str, str, tuple[float, float, float] | None]) -> None:
         AppKit = self._AppKit

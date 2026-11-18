@@ -307,7 +307,20 @@ class RecordingStatusWindow:
         self._mode_control.setSegmentDistribution_(AppKit.NSSegmentDistributionFillEqually)
         self._mode_control.setControlSize_(AppKit.NSControlSizeLarge)
         self._mode_hint = self._label("", size=12, secondary=True, wrap=True)
-        mode_title = self._section_title("Mode")
+        self._commands_box = AppKit.NSButton.checkboxWithTitle_target_action_(
+            "Voice commands", self._target, "invoke:"
+        )
+        self._commands_box.setTag_(self._target.addHandler_(self._commands_clicked))
+        self._commands_box.setControlSize_(AppKit.NSControlSizeSmall)
+        self._commands_box.setFont_(AppKit.NSFont.systemFontOfSize_(11))
+        self._commands_box.setToolTip_(
+            "Start a dictation with a command, in any mode: \u201cTranslate to English: \u2026\u201d, "
+            "\u201cFormal: \u2026\u201d, \u201cFeedback: \u2026\u201d, \u201cRewrite this \u2026\u201d "
+            "(with text selected) or \u201cAirQuote, \u2026\u201d."
+        )
+        mode_title = self._hstack(
+            [self._section_title("Mode"), self._spacer(), self._commands_box], spacing=8
+        )
 
         # Today, at a glance.
         self._stat_values = {}
@@ -391,7 +404,7 @@ class RecordingStatusWindow:
             root.topAnchor().constraintEqualToAnchor_constant_(content.topAnchor(), 44),
             root.bottomAnchor().constraintEqualToAnchor_constant_(content.bottomAnchor(), -20),
         ]
-        for view in (header, self._mode_control, self._mode_hint, stats, tab_row, self._tabs, footer):
+        for view in (header, mode_title, self._mode_control, self._mode_hint, stats, tab_row, self._tabs, footer):
             constraints.append(view.widthAnchor().constraintEqualToAnchor_(root.widthAnchor()))
         AppKit.NSLayoutConstraint.activateConstraints_(constraints)
 
@@ -632,7 +645,20 @@ class RecordingStatusWindow:
         for index, candidate in enumerate(MODES):
             if candidate.key == mode.key:
                 self._mode_control.setSelectedSegment_(index)
-        self._mode_hint.setStringValue_(_MODE_HINTS.get(mode.key, ""))
+        hint = _MODE_HINTS.get(mode.key, "")
+        commands = self._modes.commands_enabled
+        self._commands_box.setState_(1 if commands else 0)
+        if commands:
+            hint += (
+                "\nVoice commands: start with \u201cTranslate to English\u201d, \u201cFormal:\u201d, "
+                "\u201cFeedback:\u201d, \u201cRewrite this \u2026\u201d (text selected) or "
+                "\u201cAirQuote, \u2026\u201d."
+            )
+        self._mode_hint.setStringValue_(hint)
+
+    def _commands_clicked(self) -> None:
+        self._modes.set_commands(bool(self._commands_box.state()))
+        self._sync_mode()
 
     def _dictate_clicked(self) -> None:
         if self._toggle_dictation is not None:

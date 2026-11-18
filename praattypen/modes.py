@@ -24,6 +24,7 @@ from praattypen.logging_setup import get_logger
 logger = get_logger(__name__)
 
 STATE_PATH = Path.home() / "Library" / "Application Support" / "PraatTypen" / "mode.txt"
+COMMANDS_FILE = "voice_commands.txt"  # next to mode.txt: "on" or "off"
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,7 @@ class ModeState:
 
     def __init__(self, path: Path = STATE_PATH, default: str = "dictate") -> None:
         self.path = path
+        self.commands_path = path.parent / COMMANDS_FILE
         self._lock = threading.Lock()
         self._listeners: list[Callable[[Mode], None]] = []
         try:
@@ -61,6 +63,33 @@ class ModeState:
         except OSError:
             saved = ""
         self._key = saved if saved in _BY_KEY else (default if default in _BY_KEY else "dictate")
+        try:
+            self._commands = self.commands_path.read_text(encoding="utf-8").strip() == "on"
+        except OSError:
+            self._commands = False
+
+    @property
+    def commands_enabled(self) -> bool:
+        """Voice commands: "Translate to English: …" at the start of a dictation."""
+        with self._lock:
+            return self._commands
+
+    def set_commands(self, enabled: bool) -> None:
+        with self._lock:
+            self._commands = bool(enabled)
+            listeners = list(self._listeners)
+            mode = _BY_KEY[self._key]
+        try:
+            self.commands_path.parent.mkdir(parents=True, exist_ok=True)
+            self.commands_path.write_text("on" if enabled else "off", encoding="utf-8")
+        except OSError as error:
+            logger.error("Spraakopdrachten-instelling niet bewaard: %s", error)
+        logger.info("Spraakopdrachten: %s", "aan" if enabled else "uit")
+        for listener in listeners:
+            try:
+                listener(mode)
+            except Exception as error:  # noqa: BLE001
+                logger.error("Fout bij instelling-wissel: %s", error)
 
     @property
     def current(self) -> Mode:
@@ -123,8 +152,14 @@ class ModeTransformer:
         self.last_failed = False
         # Selection/clipboard captured when the recording started (Rewrite).
         self.context = ""
+        # The same, split: voice commands about "this" need a real selection.
+        self.selection = ""
         # Whether the clipboard holds something you copied just now.
         self.clipboard_fresh: Callable[[], bool] = lambda: True
+        # Voice command found in the last dictation: its bar label, or "".
+        self.last_command = ""
+        # Called with the overlay text ("Translating…") once a command is heard.
+        self.on_command: Callable[[str], None] = lambda _working: None
 
     def capture(self) -> None:
         """Grab the text to rewrite, before our own paste touches anything.
@@ -133,28 +168,49 @@ class ModeTransformer:
         queries must not stall the hotkey handler that calls this.
         """
         self.context = ""
+        self.selection = ""
         self._capture_thread = None
-        if self.state.current.key != "rewrite":
+        if self.state.current.key != "rewrite" and not self.state.commands_enabled:
             return
 
         allow_clipboard = self.clipboard_fresh()
 
         def grab() -> None:
-            self.context = capture_context(allow_clipboard=allow_clipboard)
+            self.selection = _selected_text()
+            self.context = self.selection or (
+                capture_context(allow_clipboard=True, selected="") if allow_clipboard else ""
+            )
 
         self._capture_thread = threading.Thread(target=grab, daemon=True, name="airquote-context")
         self._capture_thread.start()
 
+    def _wait_for_capture(self) -> None:
+        thread = getattr(self, "_capture_thread", None)
+        if thread is not None:
+            thread.join(timeout=2.0)
+
     def transform(self, text: str) -> str:
+        self.last_command = ""
+        self.last_failed = False
+        if self.state.commands_enabled:
+            from praattypen import voice_commands
+
+            command = voice_commands.parse(text)
+            if command is not None:
+                self._wait_for_capture()
+                prompt, working = self._command_prompt(command)
+                if prompt is not None:
+                    self.last_command = command.label
+                    logger.info("Spraakopdracht: %s", command.label)
+                    self.on_command(working)
+                    return self._run(prompt, text, command.label)
         mode = self.state.current
         if mode.key == "to_dutch":
             prompt = translation_prompt(text, "Dutch")
         elif mode.key == "feedback":
             prompt = feedback_prompt(text)
         elif mode.key == "rewrite":
-            thread = getattr(self, "_capture_thread", None)
-            if thread is not None:
-                thread.join(timeout=2.0)
+            self._wait_for_capture()
             if not self.context.strip():
                 # Nothing selected and nothing freshly copied: rewriting would
                 # mean inventing a target, so paste what was said instead.
@@ -163,11 +219,50 @@ class ModeTransformer:
             prompt = rewrite_prompt(text, self.context)
         else:
             return text
+        return self._run(prompt, text, mode.title)
+
+    def _command_prompt(self, command) -> tuple[str | None, str]:
+        """The AI prompt for a voice command, and the bar text while it runs.
+
+        None when the command has nothing to work on: then the words are
+        dictated as they are.
+        """
+        from praattypen import voice_commands
+
+        # "Translate to English" with nothing after it: the selected text.
+        text = command.body or self.context
+        if command.kind == "translate":
+            if not text.strip():
+                return None, ""
+            return translation_prompt(text, command.argument), "Translating…"
+        if command.kind == "feedback":
+            if not command.body.strip():
+                return None, ""
+            return feedback_prompt(command.body), "Writing feedback…"
+        if command.kind == "style":
+            if not text.strip():
+                return None, ""
+            if command.body:
+                return voice_commands.style_prompt(command.body, command.argument), "Rewriting…"
+            return rewrite_prompt(
+                f"Rewrite this as {voice_commands.style_phrase(command.argument)}.", text
+            ), "Rewriting…"
+        # instruct
+        if command.needs_target:
+            # "Make this shorter" is only a command when "this" is selected.
+            if not self.selection.strip():
+                return None, ""
+            return rewrite_prompt(command.body, self.selection), "Rewriting…"
+        if not command.body.strip():
+            return None, ""
+        return rewrite_prompt(command.body, self.context), "Working on it…"
+
+    def _run(self, prompt: str, text: str, title: str) -> str:
         self.last_failed = False
         try:
             result = strip_thinking(self.generate(prompt, self.model, self.timeout)).strip()
         except Exception as error:  # noqa: BLE001 - never lose the dictation
-            logger.error("%s mislukt (%s); ruwe tekst geplakt.", mode.title, error)
+            logger.error("%s mislukt (%s); ruwe tekst geplakt.", title, error)
             # Shown on the floating bar: otherwise plain text arrives where a
             # translation was expected and nothing says why.
             self.last_failed = True
@@ -273,14 +368,15 @@ class ClipboardWatch:
             return bool(self._changed_at) and _time.monotonic() - self._changed_at <= seconds
 
 
-def capture_context(allow_clipboard: bool = True) -> str:
+def capture_context(allow_clipboard: bool = True, selected: str | None = None) -> str:
     """The text you are working on: the current selection, else the clipboard.
 
     The selection is read through the Accessibility API, which AirQuote already
     has for pasting. Not every app exposes it (some browsers and Electron apps
     don't); copying the text first (Cmd+C) always works.
     """
-    selected = _selected_text()
+    if selected is None:
+        selected = _selected_text()
     if selected:
         return selected
     if not allow_clipboard:

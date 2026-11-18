@@ -118,6 +118,8 @@ def run(config_path: str | Path) -> None:
     injector = ClipboardInjector()
     clipboard = ClipboardWatch()
     transformer.clipboard_fresh = clipboard.fresh
+    # A voice command was heard: the bar says what it is doing now.
+    transformer.on_command = lambda working: overlay.show_processing(working)
 
     def paste_text(text: str):
         # Our own clipboard writes must not look like "you just copied this".
@@ -185,6 +187,7 @@ def run(config_path: str | Path) -> None:
                 overlay.show_done(
                     pipeline.last_pasted,
                     note="Plain text · AI off" if transformer.last_failed else "",
+                    label=transformer.last_command,
                 )
                 sounds.done()
                 menu_bar.set_last_transcript(text)

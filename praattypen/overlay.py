@@ -23,7 +23,7 @@ class Overlay(Protocol):
     def show_processing(self, label: str = "Transcribing…") -> None:
         ...
 
-    def show_done(self, pasted: bool = True, note: str = "") -> None:
+    def show_done(self, pasted: bool = True, note: str = "", label: str = "") -> None:
         ...
 
     def hide(self) -> None:
@@ -48,7 +48,7 @@ class NullOverlay:
     def show_processing(self, label: str = "Transcribing…") -> None:
         return None
 
-    def show_done(self, pasted: bool = True, note: str = "") -> None:
+    def show_done(self, pasted: bool = True, note: str = "", label: str = "") -> None:
         return None
 
     def hide(self) -> None:
@@ -217,6 +217,7 @@ class RecordingOverlay:
         self._click_handler = None
         self._mode_source = None
         self._done_note = ""
+        self._done_label = ""
         self._click_target = _target_class().alloc().init()
         catcher = AppKit.NSButton.alloc().initWithFrame_(NSMakeRect(0, 0, width, height))
         catcher.setTitle_("")
@@ -244,8 +245,10 @@ class RecordingOverlay:
         self._processing_label = label
         self._call_on_main(self._enter, "processing")
 
-    def show_done(self, pasted: bool = True, note: str = "") -> None:
+    def show_done(self, pasted: bool = True, note: str = "", label: str = "") -> None:
+        """note: a warning, held longer (orange); label: what was done ("→ English")."""
         self._done_note = note
+        self._done_label = label
         self._call_on_main(self._enter, "done" if pasted else "copied")
 
     def hide(self) -> None:
@@ -296,7 +299,8 @@ class RecordingOverlay:
             self._orb.set_glow(ui.READY, 0.9)
             self._orb.set_speed(6.0)
             if mode == "done":
-                self._label.setStringValue_(self._done_note or "✓  Pasted")
+                pasted_text = f"✓  Pasted · {self._done_label}" if self._done_label else "✓  Pasted"
+                self._label.setStringValue_(self._done_note or pasted_text)
                 self._label.setTextColor_(
                     ui.rgb((1.0, 0.78, 0.45)) if self._done_note else ui.rgb((0.55, 0.95, 0.65))
                 )

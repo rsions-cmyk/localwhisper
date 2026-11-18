@@ -28,6 +28,24 @@ project and in Dutch.
   | Feedback | your spoken remarks as structured, constructive student feedback | Ollama |
   | Rewrite | your selected (or just-copied) text, changed as you asked: "make this more academic" | Ollama |
 
+- **Voice commands** (optional; tick *Voice commands* in the window): say what to do at the
+  start of a dictation, in any mode. Dutch and English both work:
+
+  | Start with | What gets pasted |
+  |---|---|
+  | "Translate to English: …", "Vertaal naar het Nederlands: …" (also German, French, Spanish, Italian, Portuguese) | the rest, translated |
+  | "Formal: …", "Informal:", "Academic:", "Friendly:", "Polite:", "Professional:", "Shorter:", "Email:" (or Dutch: "Formeel:", "Korter:", …) | the rest, in that style |
+  | "In a cheerful tone: …", "In een zakelijke toon: …" | the rest, in that tone |
+  | "Feedback: …" | structured student feedback |
+  | "Rewrite this …", "Make this …", "Herschrijf …", "Maak dit …" | the **selected** text, changed as you asked |
+  | "AirQuote, …" | whatever you ask: "AirQuote, write a polite reply saying I'll be late" |
+
+  Say a command without anything after it ("Translate to English.") to apply it to the
+  selected or just-copied text. "Translate this to English and make it more commercial"
+  works as one instruction. To keep ordinary dictation from being taken as a command, a
+  one-word command ("Formal", "Feedback") needs a short pause after it, and "Rewrite this /
+  Make this" only counts while text is selected. Needs Ollama; the bar shows what was done
+  ("✓ Pasted · → English").
 - **Vocabulary**: names and jargon it should always spell your way (BUas, ILO, …).
 - **Recordings**: drop an interview, meeting or lecture into the window, or record one
   there. You get a transcript with timestamps and, optionally, **speakers told apart**
@@ -159,7 +177,7 @@ Python errors go to `~/Library/Logs/PraatTypen.out.log`. Log messages are in Dut
 | The hotkey does nothing | Input Monitoring is off, or was switched on while AirQuote was running. Switch it on and restart AirQuote. Meanwhile, use **Start Dictation** in the window. |
 | The bar appears but nothing is pasted | Accessibility is off. The text is still on your clipboard: paste with Cmd+V. |
 | "te kort of te stil" in the log | Microphone permission is missing, or you spoke very softly. |
-| Something other than what you said is pasted | A mode other than Dictate is on (the bar names it). Switch back to Dictate in the window. |
+| Something other than what you said is pasted | A mode other than Dictate is on (the bar names it), or your dictation started with a voice command (the bar says "✓ Pasted · Formal" and so on). Switch back to Dictate, or untick *Voice commands*. |
 | Permission is on but it doesn't work | After a rebuild macOS treats the app as new. Run `tccutil reset ListenEvent nl.airquote.app` (and the same with `Accessibility` and `Microphone`), restart, and allow again. |
 | A transcript says the speaker model needs a login | See *Speaker separation* above. |
 | `PaErrorCode -9986` in the log | The audio device changed (AirPods). AirQuote re-reads the devices and retries once. |
